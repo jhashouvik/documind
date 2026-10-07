@@ -1,0 +1,36 @@
+# One Argo CD Application = "keep namespace documind equal to k8s/gitops in my Git repo".
+# EDIT repoURL to YOUR repository before applying.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: documind
+  namespace: argocd
+  # CAREFUL: deleting the Application deletes everything it deployed - including the
+  # documind Namespace (k8s/gitops includes it) and therefore the Qdrant PVC and your
+  # indexed documents. Remove this finalizer first to detach Argo CD without deleting.
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_GITHUB_USER/documind.git    # <-- EDIT
+    targetRevision: main
+    path: k8s/gitops                 # Argo CD sees kustomization.yaml and runs kustomize
+  destination:
+    server: https://kubernetes.default.svc     # this same cluster
+    namespace: documind
+  syncPolicy:
+    automated:
+      prune: true                    # a manifest deleted from Git is deleted from the cluster
+      selfHeal: true                 # a manual kubectl edit is reverted within seconds
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 3
+      backoff: {duration: 10s, factor: 2, maxDuration: 1m}
+  # The HPA changes Rollout.spec.replicas all the time. Without this, Argo CD
+  # would see "OutOfSync" and selfHeal would fight the autoscaler.
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Rollout
+      jsonPointers: [/spec/replicas]

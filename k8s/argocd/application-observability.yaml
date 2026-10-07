@@ -1,0 +1,18 @@
+# Day 7: let Argo CD also manage the DocuMind ServiceMonitor,
+# alert rules and Grafana dashboard. Requires kube-prometheus-stack (its CRDs).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: documind-observability
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_GITHUB_USER/documind.git    # <-- EDIT
+    targetRevision: main
+    path: k8s/70-observability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: documind
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}

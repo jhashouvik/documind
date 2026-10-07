@@ -1,0 +1,23 @@
+# The product's front door: http://documind.localtest.me:8080 (via SSH tunnel)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-service
+  namespace: documind
+  annotations:
+    # Server-Sent Events: nginx must pass each chunk through immediately,
+    # otherwise the whole answer arrives at once at the end.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"      # uploads go through the UI proxy
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: documind.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: agent-service, port: {name: http}}

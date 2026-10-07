@@ -1,0 +1,13 @@
+# The selector includes track: stable. Without it this Service would ALSO pick
+# up the canary pods from 60-canary (they share app.kubernetes.io/name), and
+# the canary would silently get a share of traffic you never configured.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: documind
+  labels: {app.kubernetes.io/name: agent-service, app.kubernetes.io/part-of: documind, track: stable}
+spec:
+  selector: {app.kubernetes.io/name: agent-service, track: stable}
+  ports:
+    - {name: http, port: 8002, targetPort: http}

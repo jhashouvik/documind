@@ -1,0 +1,14 @@
+{"question": "What total insured value must be referred to the chief underwriter?", "expected_file": "nimbus-property-underwriting-guidelines.md", "keywords": ["250 million"]}
+{"question": "What is the maximum line Nimbus writes on one risk?", "expected_file": "nimbus-property-underwriting-guidelines.md", "keywords": ["75 million"]}
+{"question": "Which warehouses need a full sprinkler system?", "expected_file": "nimbus-property-underwriting-guidelines.md", "keywords": ["5,000"]}
+{"question": "What deductible applies to earthquake zone 4 risks?", "expected_file": "nimbus-property-underwriting-guidelines.md", "keywords": ["2 percent"]}
+{"question": "How long is a risk survey valid?", "expected_file": "nimbus-property-underwriting-guidelines.md", "keywords": ["36 months"]}
+{"question": "What loss-free discount can be given?", "expected_file": "nimbus-property-underwriting-guidelines.md", "keywords": ["15 percent"]}
+{"question": "How quickly must a first notice of loss be acknowledged?", "expected_file": "nimbus-claims-handling-sop.md", "keywords": ["24 hours"]}
+{"question": "Who handles claims above one million dollars?", "expected_file": "nimbus-claims-handling-sop.md", "keywords": ["senior adjuster"]}
+{"question": "Up to what amount can a senior adjuster approve a payment?", "expected_file": "nimbus-claims-handling-sop.md", "keywords": ["2 million"]}
+{"question": "When must we notify retrocession partners after a catastrophe?", "expected_file": "nimbus-claims-handling-sop.md", "keywords": ["48 hours"]}
+{"question": "How often do cedants get a status update on open claims?", "expected_file": "nimbus-claims-handling-sop.md", "keywords": ["14 days"]}
+{"question": "What is the response time for a P1 incident?", "expected_file": "documind-platform-runbook.md", "keywords": ["15 minutes"]}
+{"question": "What availability does DocuMind target?", "expected_file": "documind-platform-runbook.md", "keywords": ["99.5"]}
+{"question": "How often is the OpenRouter API key rotated?", "expected_file": "documind-platform-runbook.md", "keywords": ["90 days"]}

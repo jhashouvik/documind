@@ -1,0 +1,48 @@
+# Alert rules evaluated by Prometheus (kube-prometheus-stack picks up
+# PrometheusRules labelled release: mon). See them under Alerts in the
+# Prometheus UI; route them to Slack/e-mail with Alertmanager.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: documind
+  namespace: documind
+  labels:
+    release: mon
+spec:
+  groups:
+    - name: documind.rules
+      rules:
+        - alert: DocuMindHighErrorRate
+          expr: |
+            sum(rate(documind_http_requests_total{namespace="documind", status=~"5.."}[5m]))
+              / clamp_min(sum(rate(documind_http_requests_total{namespace="documind"}[5m])), 0.001) > 0.05
+          for: 5m
+          labels: {severity: page}
+          annotations:
+            summary: "More than 5% of DocuMind requests fail with 5xx"
+            runbook: "Check `kubectl -n documind get pods` and agent-service logs"
+        - alert: DocuMindLLMErrors
+          expr: sum(rate(documind_llm_requests_total{namespace="documind", status="error"}[10m])) > 0.05
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: "LLM calls are failing (key, credits, rate limit or model)"
+        - alert: DocuMindEmbeddingErrors
+          expr: sum by (status) (rate(documind_embed_errors_total{namespace="documind"}[10m])) > 0.02
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: "OpenRouter embedding calls failing with HTTP {{ $labels.status }} (401 key, 402 credits, 429 rate limit)"
+        - alert: DocuMindKnowledgeNotReady
+          expr: max(documind_knowledge_ready{namespace="documind"}) < 1
+          for: 5m
+          labels: {severity: page}
+          annotations:
+            summary: "No knowledge-service pod is ready - the agent cannot search documents"
+        - alert: DocuMindSlowFirstToken
+          expr: |
+            histogram_quantile(0.95, sum by (le) (rate(documind_llm_time_to_first_token_seconds_bucket{namespace="documind"}[10m]))) > 3
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "p95 time to first token above the 3 s objective"

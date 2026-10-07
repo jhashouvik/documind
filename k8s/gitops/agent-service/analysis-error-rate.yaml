@@ -1,0 +1,41 @@
+# "Is the canary healthy?" answered by Prometheus.
+# Every 30 s, 4 times: the share of 5xx responses served by the canary pods.
+#   result[0] < 0.05  -> Successful measurement
+#   2 failed measurements (failureLimit 1 means the 2nd failure fails it) -> Rollout ABORTED
+# Edge cases handled in the query (found by testing it):
+#   * no 5xx series yet            -> `or vector(0)`   (empty result would ERROR the measurement)
+#   * no traffic in the last minute -> clamp_min(..., 0.0001) avoids 0/0 = NaN, and
+#                                      NaN < 0.05 is FALSE = a failed measurement
+#   * no series at all              -> `or vector(1)`
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: agent-error-rate
+spec:
+  args:
+    - name: canary-job
+    - name: max-error-ratio
+      value: "0.05"
+  metrics:
+    - name: canary-5xx-ratio
+      interval: 30s
+      count: 4
+      failureLimit: 1
+      successCondition: result[0] < {{args.max-error-ratio}}
+      provider:
+        prometheus:
+          address: http://mon-kube-prometheus-stack-prometheus.monitoring.svc:9090
+          query: |
+            (
+              sum(rate(documind_http_requests_total{
+                namespace="documind", job="{{args.canary-job}}",
+                route=~"/v1/chat.*", status=~"5.."}[1m]))
+              or vector(0)
+            )
+            /
+            (
+              clamp_min(sum(rate(documind_http_requests_total{
+                namespace="documind", job="{{args.canary-job}}",
+                route=~"/v1/chat.*"}[1m])), 0.0001)
+              or vector(1)
+            )

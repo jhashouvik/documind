@@ -1,0 +1,23 @@
+# A second Ingress for the SAME host, marked as canary. ingress-nginx sends
+# `canary-weight` percent of requests to it; the header X-Canary: always
+# forces the canary, X-Canary: never forces stable (useful for testers).
+# Promote: raise the weight 20 -> 50 -> 100. Abort: set it to "0".
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-service-canary
+  namespace: documind
+  annotations:
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "20"
+    nginx.ingress.kubernetes.io/canary-by-header: "X-Canary"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: documind.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: agent-service-canary, port: {name: http}}

@@ -1,0 +1,25 @@
+# Day 14: put the documind namespace into the Istio ambient mesh.
+# A kustomize Component, switched on from k8s/gitops/kustomization.yaml:
+#   components: [../keda, ../istio]
+# Requires Istio (ambient profile) and the Gateway API CRDs to be installed first.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - networkpolicy-ambient.yaml       # FIRST: let mesh traffic (port 15008) and probes through
+  - authz-l4.yaml                    # identity rules enforced by ztunnel (Qdrant, Redis)
+  - waypoint.yaml                    # an L7 proxy for knowledge-service
+  - authz-l7.yaml                    # path/method rules enforced by the waypoint
+  - httproute-timeouts.yaml          # timeouts as configuration, not code
+patches:
+  # enrol every pod of the namespace in the ambient mesh (no restart, no sidecar)
+  - target: {kind: Namespace, name: documind}
+    patch: |-
+      - op: add
+        path: /metadata/labels/istio.io~1dataplane-mode
+        value: ambient
+  # send traffic for knowledge-service (and its preview) through the waypoint
+  - target: {kind: Service, name: "knowledge-service|knowledge-service-preview"}
+    patch: |-
+      - op: add
+        path: /metadata/labels/istio.io~1use-waypoint
+        value: knowledge-waypoint

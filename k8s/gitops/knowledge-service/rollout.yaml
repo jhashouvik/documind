@@ -1,0 +1,92 @@
+# knowledge-service as an Argo Rollout with a BLUE-GREEN strategy.
+#
+#   1. you push a new image tag / config  -> a GREEN ReplicaSet starts next to BLUE
+#   2. green becomes ready                -> knowledge-service-preview points at it
+#   3. prePromotionAnalysis               -> a Job runs `python -m app.selftest` against
+#                                            the preview Service (PROMOTE / ABORT)
+#   4. autoPromotionEnabled: false        -> the Rollout PAUSES: a human looks at it
+#                                            (kb-preview.localtest.me) and promotes
+#   5. promote                            -> knowledge-service switches to green INSTANTLY
+#   6. scaleDownDelaySeconds              -> blue stays up 60 s (instant rollback), then goes
+#
+# The pod template is the same as k8s/20-knowledge-service/deployment.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: knowledge-service
+  labels: {app.kubernetes.io/name: knowledge-service, app.kubernetes.io/part-of: documind}
+spec:
+  replicas: 1                          # the HPA takes over from here
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: {app.kubernetes.io/name: knowledge-service}
+  strategy:
+    blueGreen:
+      activeService: knowledge-service
+      previewService: knowledge-service-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 60
+      prePromotionAnalysis:
+        templates:
+          - templateName: knowledge-selftest
+        args:
+          - name: preview-url
+            value: http://knowledge-service-preview.documind.svc:8001
+          - name: image                # filled in by kustomize (replacements) from the pod image
+            value: documind/knowledge-service:latest
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: knowledge-service
+        app.kubernetes.io/part-of: documind
+    spec:
+      serviceAccountName: knowledge-service
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: knowledge-service
+          image: documind/knowledge-service:latest     # tag set by `images:` in ../kustomization.yaml
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: http, containerPort: 8001}
+          envFrom:
+            - configMapRef: {name: knowledge-config}    # kustomize rewrites to knowledge-config-<hash>
+          env:
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef: {name: documind-llm, key: OPENROUTER_API_KEY}
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec: {command: ["sleep", "5"]}
+          resources:
+            requests: {cpu: 100m, memory: 160Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}

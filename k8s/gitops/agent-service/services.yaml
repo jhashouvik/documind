@@ -1,0 +1,25 @@
+# Canary needs two Services. Argo Rollouts adds rollouts-pod-template-hash to
+# each selector at runtime:
+#   agent-service         -> STABLE pods
+#   agent-service-canary  -> CANARY pods (during a rollout; otherwise also stable)
+# Prometheus scrapes both, so metrics carry job="agent-service" or
+# job="agent-service-canary" - that is how the analysis compares them.
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  labels: {app.kubernetes.io/name: agent-service, app.kubernetes.io/part-of: documind}
+spec:
+  selector: {app.kubernetes.io/name: agent-service}
+  ports:
+    - {name: http, port: 8002, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service-canary
+  labels: {app.kubernetes.io/name: agent-service, app.kubernetes.io/part-of: documind}
+spec:
+  selector: {app.kubernetes.io/name: agent-service}
+  ports:
+    - {name: http, port: 8002, targetPort: http}

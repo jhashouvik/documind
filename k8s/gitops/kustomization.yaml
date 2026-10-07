@@ -1,0 +1,61 @@
+# GitOps entry point (Days 6-7). Argo CD renders THIS folder with kustomize and
+# keeps the cluster equal to it. You release by committing, not by kubectl:
+#
+#   cd k8s/gitops
+#   kustomize edit set image documind/agent-service=documind/agent-service:1.1.0
+#   git commit -am "agent 1.1.0" && git push      # Argo CD syncs, Argo Rollouts does the canary
+#
+# Differences from the plain manifests in k8s/20-* and k8s/40-*:
+#   * Deployments are replaced by Argo Rollouts (blue-green / canary)
+#   * ConfigMaps are GENERATED with a content hash in their name, so a config
+#     change is a new pod template = a new, safely rolled-out revision
+#   * the Secret documind-llm is NOT here (never commit secrets) - create it by hand
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: documind
+resources:
+  - ../00-namespace
+  - ../10-qdrant
+  - ../30-redis
+  - ../50-network-policies
+  - knowledge-service
+  - agent-service
+
+# Optional platform features (kustomize Components):
+#   Day 13 (KEDA):  components: [../keda]
+#   Day 14 (Istio): components: [../keda, ../istio]
+components: []
+
+# Teach kustomize the structure of a Rollout (from the Argo Rollouts docs),
+# otherwise it would not rewrite knowledge-config -> knowledge-config-<hash> inside it.
+configurations:
+  - rollout-transform.yaml
+
+configMapGenerator:
+  - name: knowledge-config                # becomes knowledge-config-<hash>
+    envs: [knowledge-service/config.env]
+  - name: agent-config
+    envs: [agent-service/config.env]
+generatorOptions:
+  labels: {app.kubernetes.io/part-of: documind}
+  annotations:
+    # keep old generated ConfigMaps: pods of the previous revision still reference
+    # them until the rollout finishes, so Argo CD must not prune them
+    argocd.argoproj.io/sync-options: Prune=false
+
+# The ONLY lines you normally edit for a release.
+images:
+  - name: documind/knowledge-service
+    newTag: "1.0.0"
+  - name: documind/agent-service
+    newTag: "1.0.0"
+
+# Copy the knowledge image into the self-test Job argument, so the NEW version
+# tests itself and there is still only one place to change.
+# (No version pod label here: the image tag and the documind_*_build_info
+# metric carry the version.)
+replacements:
+  - source: {kind: Rollout, name: knowledge-service, fieldPath: spec.template.spec.containers.0.image}
+    targets:
+      - select: {kind: Rollout, name: knowledge-service}
+        fieldPaths: ["spec.strategy.blueGreen.prePromotionAnalysis.args.[name=image].value"]

@@ -1,0 +1,12 @@
+# Zero-trust baseline: no pod in the namespace accepts ANY incoming
+# connection unless a later policy allows it. (Outgoing traffic is not
+# restricted here - agent-service must reach openrouter.ai.)
+# Traffic from the node itself (kubelet health probes) is always allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: documind
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]

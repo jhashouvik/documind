@@ -1,0 +1,12 @@
+# Everything for a full DocuMind deployment:  kubectl apply -k k8s/
+# The tutorial applies the folders one by one instead, so you see each piece.
+# 60-canary and 70-observability are optional and applied separately.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - 00-namespace
+  - 10-qdrant
+  - 20-knowledge-service
+  - 30-redis
+  - 40-agent-service
+  - 50-network-policies

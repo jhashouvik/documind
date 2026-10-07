@@ -1,0 +1,21 @@
+# Direct access to Service 1 for testing: http://kb.localtest.me:8080/docs
+# (port 8080 = your SSH tunnel). Remove it later - in production only
+# agent-service would be public.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: knowledge-service
+  namespace: documind
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"     # default 1m -> "413 Request Entity Too Large"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"  # large PDFs = many embedding API calls
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: kb.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: knowledge-service, port: {name: http}}

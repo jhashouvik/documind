@@ -1,0 +1,81 @@
+# Who may talk to whom:
+#   ingress-nginx  -> agent-service (8002), knowledge-service (8001, test Ingress)
+#   agent-service  -> knowledge-service (8001), redis (6379)
+#   knowledge-svc  -> qdrant (6333/6334)
+#   monitoring     -> both services (metrics)
+#   release-gate   -> knowledge-service (the Argo Rollouts analysis Job, Day 8)
+#   load-test      -> agent-service (the in-cluster KEDA load test, Day 13)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-agent-service
+  namespace: documind
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: agent-service}     # stable AND canary
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:                       # in-cluster load test Job (Day 13)
+            matchLabels: {documind.io/load-test: "true"}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports:
+        - {protocol: TCP, port: 8002}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-knowledge-service
+  namespace: documind
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: knowledge-service}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: agent-service}
+        - podSelector:                       # pre-promotion self-test Job pods
+            matchLabels: {documind.io/release-gate: "true"}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: ingress-nginx}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports:
+        - {protocol: TCP, port: 8001}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-qdrant-from-knowledge
+  namespace: documind
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: qdrant}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: knowledge-service}
+      ports:
+        - {protocol: TCP, port: 6333}
+        - {protocol: TCP, port: 6334}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-from-agent
+  namespace: documind
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: redis}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: agent-service}
+      ports:
+        - {protocol: TCP, port: 6379}

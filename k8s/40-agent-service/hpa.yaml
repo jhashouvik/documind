@@ -1,0 +1,21 @@
+# agent-service is I/O-bound: it mostly WAITS for the LLM. CPU stays low even
+# when it is busy, so CPU is a weak scaling signal. We still use it here
+# (it catches JSON/streaming overhead at high load); tutorial Part 7 explains
+# scaling on in-flight requests with KEDA/Prometheus instead.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-service
+  namespace: documind
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: agent-service}
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 60}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

@@ -1,0 +1,15 @@
+# Day 13: KEDA scales agent-service instead of the CPU-based HPA.
+# A kustomize Component: switched on from k8s/gitops/kustomization.yaml
+#   components: [../keda]
+# It ADDS the ScaledObject and DELETES the HPA (two autoscalers on one Rollout fight).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - scaledobject.yaml
+patches:
+  - patch: |-
+      $patch: delete
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: agent-service

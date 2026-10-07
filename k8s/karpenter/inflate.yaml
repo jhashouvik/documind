@@ -1,0 +1,36 @@
+# A workload that NEEDS new nodes: 0 replicas now; scale it up to watch
+# Karpenter launch nodes, scale it down to watch consolidation remove them.
+#   kubectl scale deployment inflate -n karpenter-demo --replicas=10
+# pause = a container that does nothing (on KWOK nodes nothing runs anyway);
+# the 1 CPU request is what forces Karpenter to buy capacity.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: karpenter-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inflate
+  namespace: karpenter-demo
+spec:
+  replicas: 0
+  selector:
+    matchLabels: {app: inflate}
+  template:
+    metadata:
+      labels: {app: inflate}
+    spec:
+      terminationGracePeriodSeconds: 0
+      nodeSelector:
+        documind.io/pool: genai-burst        # only Karpenter-made nodes have this label
+      tolerations:
+        - key: documind.io/burst
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      containers:
+        - name: inflate
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests: {cpu: "1", memory: 1Gi}

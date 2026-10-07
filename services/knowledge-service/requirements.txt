@@ -1,0 +1,13 @@
+# Runtime dependencies (pinned so every image build is identical)
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+pydantic-settings==2.15.0
+qdrant-client==1.19.1
+httpx==0.28.1
+pypdf==6.19.0
+prometheus-client==0.26.0
+opentelemetry-sdk==1.45.0
+opentelemetry-exporter-otlp-proto-http==1.45.0
+opentelemetry-instrumentation-fastapi==0.66b0
+opentelemetry-instrumentation-httpx==0.66b0

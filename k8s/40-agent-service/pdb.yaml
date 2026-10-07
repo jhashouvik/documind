@@ -1,0 +1,9 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agent-service
+  namespace: documind
+spec:
+  minAvailable: 1                        # 2 replicas: a drain may take one, never both
+  selector:
+    matchLabels: {app.kubernetes.io/name: agent-service, track: stable}

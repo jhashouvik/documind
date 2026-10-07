@@ -1,0 +1,23 @@
+# The ONE Ingress you write. During a canary, Argo Rollouts creates a second,
+# temporary Ingress "agent-service-agent-service-canary" with the annotations
+#   nginx.ingress.kubernetes.io/canary: "true"
+#   nginx.ingress.kubernetes.io/canary-weight: "<current setWeight>"
+# (exactly what you did by hand on Day 5) and deletes it when the rollout ends.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-service
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"     # SSE streams stay open
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: documind.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: agent-service, port: {name: http}}

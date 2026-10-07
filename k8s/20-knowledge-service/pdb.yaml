@@ -1,0 +1,12 @@
+# PodDisruptionBudget: limits VOLUNTARY evictions (node drain, cluster upgrade).
+# maxUnavailable: 1 (not minAvailable: 1) so a single-replica service can
+# still be drained; with 2+ replicas it guarantees they are not all evicted at once.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: knowledge-service
+  namespace: documind
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: knowledge-service}

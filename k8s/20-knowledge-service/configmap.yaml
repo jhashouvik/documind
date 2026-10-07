@@ -1,0 +1,35 @@
+# Non-secret configuration -> environment variables of the container.
+# After editing: kubectl apply -f ... then  kubectl rollout restart deployment/knowledge-service -n documind
+# (env vars are read only when a container starts).
+# The OpenRouter key is NOT here - it comes from the Secret documind-llm.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: knowledge-config
+  namespace: documind
+  labels: {app.kubernetes.io/name: knowledge-service, app.kubernetes.io/part-of: documind}
+data:
+  APP_VERSION: "1.0.0"
+  LOG_LEVEL: "INFO"
+  QDRANT_URL: "http://qdrant:6333"
+  COLLECTION_PREFIX: "documind"         # one collection per embedding model: documind__<model-slug>
+  # Embeddings come from OpenRouter (POST https://openrouter.ai/api/v1/embeddings)
+  EMBEDDING_PROVIDER: "openrouter"
+  EMBEDDING_MODEL: "openai/text-embedding-3-small"      # default in the UI
+  EMBEDDING_MODELS: "openai/text-embedding-3-small,openai/text-embedding-3-large,qwen/qwen3-embedding-0.6b"
+  EMBED_BATCH_SIZE: "64"
+  EMBED_TIMEOUT_S: "30"
+  EMBED_MAX_RETRIES: "3"
+  # Chunking defaults + the limits the UI sliders may use
+  CHUNK_SIZE: "800"
+  CHUNK_OVERLAP: "120"
+  MIN_CHUNK_SIZE: "200"
+  MAX_CHUNK_SIZE: "4000"
+  MAX_UPLOAD_MB: "20"
+  DEFAULT_TOP_K: "5"
+  MAX_TOP_K: "20"
+  SCORE_THRESHOLD: "0.25"
+  APP_URL: "http://documind.localtest.me"
+  # Tracing (Day 10). Empty = tracing off. Set to the OTel Collector to turn it on:
+  #   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability:4318"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""

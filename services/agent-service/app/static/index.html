@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocuMind</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eef2f6; --panel:#ffffff; --ink:#0f1b2d; --muted:#5b6b82; --line:#d8e0ea;
+  --side:#0f1b2d; --side-ink:#dbe4f0; --side-muted:#8a9ab3; --side-line:#22324a; --side-card:#15253b;
+  --accent:#0e9f8e; --accent-ink:#ffffff; --cite:#b45309; --cite-bg:#fdf2e3;
+  --canary:#b45309; --stable:#0e9f8e; --err:#c2410c; --err-bg:#fff1ea;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0b1320; --panel:#111c2d; --ink:#e3eaf4; --muted:#93a3ba; --line:#1f2e45;
+  --side:#070d17; --side-line:#1a2740; --side-card:#0e1a2c; --cite-bg:#2e2213; --cite:#f0a651; --err-bg:#2c1710; --err:#fb8c5a;}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--ink);font-size:15px;line-height:1.55;
+  display:grid;grid-template-columns:330px 1fr;height:100vh;overflow:hidden}
+@media (max-width:860px){body{grid-template-columns:1fr;grid-template-rows:auto 1fr;overflow:auto;height:auto;min-height:100vh}}
+button,select,input{font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- sidebar ---------- */
+aside{background:var(--side);color:var(--side-ink);display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--side-line)}
+.brand{padding:20px 20px 10px}
+.brand h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em}
+.brand h1 span{color:var(--accent)}
+.brand p{margin:3px 0 0;color:var(--side-muted);font-size:13px}
+.tabs{display:flex;gap:4px;margin:6px 16px 10px;background:var(--side-card);border-radius:10px;padding:4px}
+.tabs button{flex:1;background:none;border:0;color:var(--side-muted);border-radius:7px;padding:6px 8px;font-size:13.5px;font-weight:600}
+.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+.pane{display:flex;flex-direction:column;min-height:0;flex:1}
+.pane[hidden]{display:none}
+.kb{margin:0 16px 8px;font-size:12px;color:var(--side-muted);font-family:var(--mono)}
+.kb b{color:var(--side-ink);font-weight:500}
+.drop{margin:4px 16px 12px;border:1.5px dashed var(--side-line);border-radius:12px;padding:14px;text-align:center;
+  color:var(--side-muted);font-size:13.5px;transition:border-color .2s,background .2s}
+.drop.over{border-color:var(--accent);background:rgba(14,159,142,.08)}
+.drop b{color:var(--side-ink);display:block;font-size:14px;margin-bottom:2px}
+.drop small{display:block;margin-top:4px;font-family:var(--mono);font-size:11.5px}
+.drop button{margin-top:10px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:7px 14px;font-weight:600}
+.docs-head{display:flex;justify-content:space-between;align-items:baseline;padding:4px 20px 6px;font-size:13px;color:var(--side-muted)}
+.docs-head button{background:none;border:0;color:var(--side-muted);font-size:13px;padding:0}
+.docs{list-style:none;margin:0;padding:0 10px 16px;overflow-y:auto;flex:1}
+.docs li{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:9px 10px;border-radius:9px}
+.docs li:hover{background:rgba(255,255,255,.04)}
+.docs .fn{font-weight:500;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.docs .meta{grid-column:1;font-family:var(--mono);font-size:11.5px;color:var(--side-muted)}
+.docs .del{grid-row:1/3;grid-column:2;align-self:center;background:none;border:1px solid var(--side-line);color:var(--side-muted);
+  border-radius:7px;padding:2px 8px;font-size:12px}
+.docs .del:hover{color:#fca5a5;border-color:#7f1d1d}
+.docs .empty{color:var(--side-muted);font-size:13.5px;padding:10px}
+.status-line{padding:10px 20px;border-top:1px solid var(--side-line);font-family:var(--mono);font-size:11.5px;color:var(--side-muted);min-height:38px}
+
+/* settings */
+.settings{overflow-y:auto;padding:0 16px 16px;flex:1}
+fieldset{border:1px solid var(--side-line);border-radius:12px;padding:10px 12px 12px;margin:0 0 12px;background:var(--side-card)}
+legend{font-size:12.5px;font-weight:700;color:var(--accent);padding:0 6px;letter-spacing:.02em}
+.hint{font-size:12px;color:var(--side-muted);margin:2px 0 8px;line-height:1.4}
+.ctl{margin:8px 0 0}
+.ctl label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--side-ink)}
+.ctl label output{font-family:var(--mono);font-size:12px;color:var(--accent)}
+.ctl input[type=range]{width:100%;accent-color:var(--accent);margin:4px 0 0}
+.ctl select{width:100%;margin-top:4px;background:var(--side);color:var(--side-ink);border:1px solid var(--side-line);border-radius:8px;padding:6px 8px;font-size:13px}
+.ctl .desc{font-size:11.5px;color:var(--side-muted);margin-top:2px;line-height:1.35}
+.seg{display:flex;gap:4px;margin-top:4px}
+.seg button{flex:1;background:var(--side);border:1px solid var(--side-line);color:var(--side-muted);border-radius:8px;padding:5px;font-size:12.5px}
+.seg button[aria-pressed="true"]{border-color:var(--accent);color:var(--side-ink);background:rgba(14,159,142,.15)}
+.reset{width:100%;background:none;border:1px solid var(--side-line);color:var(--side-muted);border-radius:9px;padding:7px;font-size:13px}
+.warn{font-size:12px;color:#fbbf24;margin-top:6px;line-height:1.4}
+
+/* ---------- main ---------- */
+main{display:flex;flex-direction:column;min-height:0}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 26px;border-bottom:1px solid var(--line);background:var(--panel)}
+.served{font-family:var(--mono);font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.pill.track-stable{border-color:var(--stable);color:var(--stable)}
+.pill.track-canary{border-color:var(--canary);color:var(--canary)}
+header button{background:none;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 12px;font-size:13.5px}
+#log{flex:1;overflow-y:auto;padding:26px;display:flex;flex-direction:column;gap:20px}
+.welcome{max-width:640px;margin:7vh auto 0;color:var(--muted)}
+.welcome h2{color:var(--ink);font-size:26px;margin:0 0 8px;letter-spacing:-.01em}
+.welcome .ex{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+.welcome .ex button{text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;color:var(--ink)}
+.welcome .ex button:hover{border-color:var(--accent)}
+.msg{max-width:820px;width:100%}
+.msg.user{align-self:flex-end;max-width:640px;background:var(--ink);color:var(--bg);padding:10px 15px;border-radius:14px 14px 4px 14px;width:auto}
+.msg.bot{align-self:flex-start}
+.bubble{background:var(--panel);border:1px solid var(--line);border-radius:4px 14px 14px 14px;padding:14px 18px}
+.answer p{margin:0 0 10px}.answer p:last-child{margin:0}
+.answer ul{margin:0 0 10px;padding-left:20px}
+.cite{display:inline-block;font-family:var(--mono);font-size:11.5px;font-weight:500;background:var(--cite-bg);color:var(--cite);
+  border-radius:5px;padding:0 5px;margin:0 1px;cursor:pointer;border:0;vertical-align:1px}
+.trace{margin:0 0 10px;padding:0;list-style:none;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.trace li{padding:2px 0}
+.trace .ok{color:var(--stable)}.trace .bad{color:var(--err)}
+.sources{margin-top:12px;border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:6px}
+.src{font-size:13px;border:1px solid var(--line);border-radius:9px;padding:7px 10px}
+.src summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:baseline}
+.src summary::-webkit-details-marker{display:none}
+.src .sc{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.src blockquote{margin:8px 0 2px;padding-left:10px;border-left:3px solid var(--cite);color:var(--muted);white-space:pre-wrap}
+.src.flash{border-color:var(--cite)}
+.footer-meta{margin-top:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.6}
+.error{background:var(--err-bg);color:var(--err);border-radius:10px;padding:10px 14px}
+.cursor::after{content:"▍";animation:blink 1s steps(2) infinite;color:var(--accent)}
+@keyframes blink{50%{opacity:0}}
+form{display:flex;gap:10px;padding:16px 26px 20px;border-top:1px solid var(--line);background:var(--panel)}
+textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;background:var(--bg);color:var(--ink);min-height:48px;max-height:160px}
+form button{background:var(--accent);color:var(--accent-ink);border:0;border-radius:12px;padding:0 20px;font-weight:600}
+form button:disabled{opacity:.5;cursor:default}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand"><h1>Docu<span>Mind</span></h1><p>Ask questions about your documents</p></div>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tab-docs" aria-selected="true" aria-controls="pane-docs">Documents</button>
+    <button type="button" role="tab" id="tab-set" aria-selected="false" aria-controls="pane-set">Settings</button>
+  </div>
+
+  <section class="pane" id="pane-docs" role="tabpanel" aria-labelledby="tab-docs">
+    <div class="kb">knowledge base: <b id="kb-model">…</b></div>
+    <div class="drop" id="drop">
+      <b>Add documents</b>PDF, Markdown or text, up to 20 MB
+      <small id="drop-settings"></small>
+      <div><button type="button" id="pick">Choose files</button></div>
+      <input type="file" id="file" accept=".pdf,.md,.markdown,.txt" multiple hidden>
+    </div>
+    <div class="docs-head"><span id="doc-count">Documents</span><button type="button" id="refresh">Refresh</button></div>
+    <ul class="docs" id="docs"><li class="empty">Loading…</li></ul>
+  </section>
+
+  <section class="pane" id="pane-set" role="tabpanel" aria-labelledby="tab-set" hidden>
+    <div class="settings" id="settings"><div class="hint">Loading options…</div></div>
+  </section>
+  <div class="status-line" id="status" aria-live="polite"></div>
+</aside>
+
+<main>
+  <header>
+    <div class="served" id="served">connecting…</div>
+    <button type="button" id="new">New conversation</button>
+  </header>
+  <div id="log" aria-live="polite">
+    <div class="welcome" id="welcome">
+      <h2>What do you want to know?</h2>
+      Upload documents on the left, then ask a question. DocuMind searches them, answers with
+      citations you can click, and shows each step the agent took. Tune chunking, retrieval and the
+      model in <b>Settings</b>.
+      <div class="ex">
+        <button type="button">What total insured value must be referred to the chief underwriter?</button>
+        <button type="button">How fast must we acknowledge a first notice of loss, and who handles claims above USD 1 million?</button>
+        <button type="button">If the deductible is 2% of a USD 40 million TIV, how much is it?</button>
+      </div>
+    </div>
+  </div>
+  <form id="ask">
+    <textarea id="q" rows="1" placeholder="Ask about your documents…" aria-label="Question"></textarea>
+    <button type="submit" id="send">Ask</button>
+  </form>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const API = "/api/knowledge/v1/documents";
+const store = {
+  get(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} },
+};
+let session = store.get("documind.session");
+let OPT = null;               // options from /v1/options
+let S = {};                   // current settings
+
+function setStatus(t){ $("#status").textContent = t; }
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ---------------- tabs ---------------- */
+function showTab(which){
+  $("#tab-docs").setAttribute("aria-selected", which === "docs");
+  $("#tab-set").setAttribute("aria-selected", which === "set");
+  $("#pane-docs").hidden = which !== "docs";
+  $("#pane-set").hidden = which !== "set";
+}
+$("#tab-docs").onclick = () => showTab("docs");
+$("#tab-set").onclick = () => showTab("set");
+
+/* ---------------- settings panel ---------------- */
+function defaults(){
+  const a = OPT.agent, k = OPT.knowledge;
+  return {
+    embedding_model: k ? k.default_embedding_model : null,
+    chunk_size: k ? k.chunk_size.default : 800,
+    chunk_overlap: k ? k.chunk_overlap.default : 120,
+    top_k: a.top_k.default,
+    score_threshold: k ? k.score_threshold.default : 0.25,
+    llm_model: a.default_llm_model,
+    temperature: a.temperature.default,
+    max_tokens: a.max_tokens.default,
+    max_steps: a.max_steps.default,
+    prompt_version: a.default_prompt_version,
+  };
+}
+
+function range(key, label, r, desc, fmt = v => v){
+  return `<div class="ctl"><label for="s-${key}">${label}<output id="o-${key}">${fmt(S[key])}</output></label>
+    <input type="range" id="s-${key}" min="${r.min}" max="${r.max}" step="${r.step}" value="${S[key]}">
+    <div class="desc">${desc}</div></div>`;
+}
+function select(key, label, items, desc){
+  return `<div class="ctl"><label for="s-${key}">${label}</label>
+    <select id="s-${key}">${items.map(m => `<option ${m===S[key]?"selected":""}>${esc(m)}</option>`).join("")}</select>
+    <div class="desc">${desc}</div></div>`;
+}
+
+function renderSettings(){
+  const a = OPT.agent, k = OPT.knowledge;
+  const box = $("#settings");
+  let html = "";
+  if(k){
+    const maxOverlap = Math.floor(S.chunk_size / 2);
+    html += `<fieldset><legend>INGESTION</legend>
+      <div class="hint">Applies to the next documents you upload.</div>
+      ${select("embedding_model","Embedding model", k.embedding_models,
+        "Each model is a separate knowledge base (own Qdrant collection). Switching shows only documents indexed with it.")}
+      ${range("chunk_size","Chunk size (characters)", k.chunk_size, "Smaller = precise matches, larger = more context per passage.")}
+      ${range("chunk_overlap","Chunk overlap", {min:0, max:maxOverlap, step:k.chunk_overlap.step}, "Text repeated between neighbouring chunks (max half the chunk size).")}
+    </fieldset>`;
+  } else {
+    html += `<div class="warn">knowledge-service options unavailable: ${esc(OPT.knowledge_error||"")}</div>`;
+  }
+  html += `<fieldset><legend>RETRIEVAL</legend>
+      ${range("top_k","Passages per search (top-k)", a.top_k, "How many chunks each search returns to the model.")}
+      ${range("score_threshold","Similarity threshold", k ? k.score_threshold : {min:0,max:0.9,step:0.05},
+        "Drop passages with cosine similarity below this. Too high = 'not found' answers.", v => Number(v).toFixed(2))}
+    </fieldset>
+    <fieldset><legend>GENERATION</legend>
+      ${select("llm_model","LLM model", a.llm_models, "Must support tool calling. Price and quality differ per model.")}
+      ${range("temperature","Temperature", a.temperature, "0 = deterministic, higher = more varied wording.", v => Number(v).toFixed(1))}
+      ${range("max_tokens","Max answer tokens", a.max_tokens, "Upper bound on output length (and output cost).")}
+      ${range("max_steps","Max agent steps", a.max_steps, "LLM round trips per question; each step costs tokens.")}
+      <div class="ctl"><label>Prompt style</label>
+        <div class="seg">${a.prompt_versions.map(v => `<button type="button" data-pv="${v}" aria-pressed="${v===S.prompt_version}">${v==="v1"?"v1 · detailed":"v2 · concise"}</button>`).join("")}</div></div>
+    </fieldset>
+    <button type="button" class="reset" id="reset">Reset to server defaults</button>`;
+  box.innerHTML = html;
+
+  box.querySelectorAll("input[type=range]").forEach(inp => inp.oninput = () => {
+    const key = inp.id.slice(2); S[key] = Number(inp.value);
+    if(key === "chunk_size"){            // overlap may be at most half the chunk size
+      const ov = $("#s-chunk_overlap"), max = Math.floor(S.chunk_size/2);
+      if(ov){ ov.max = max; if(S.chunk_overlap > max){ S.chunk_overlap = max; ov.value = max; $("#o-chunk_overlap").textContent = max; } }
+    }
+    const o = $(`#o-${key}`); if(o) o.textContent = key==="score_threshold" ? S[key].toFixed(2) : key==="temperature" ? S[key].toFixed(1) : S[key];
+    saveSettings(false);
+  });
+  box.querySelectorAll("select").forEach(sel => sel.onchange = () => {
+    S[sel.id.slice(2)] = sel.value; saveSettings(false);
+    if(sel.id === "s-embedding_model") loadDocs();
+  });
+  box.querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { S.prompt_version = b.dataset.pv; saveSettings(true); });
+  $("#reset").onclick = () => { S = defaults(); store.del("documind.settings"); renderSettings(); loadDocs(); updateBadges(); };
+}
+
+function saveSettings(rerender){
+  store.set("documind.settings", S);
+  updateBadges();
+  if(rerender) renderSettings();
+}
+
+function updateBadges(){
+  $("#kb-model").textContent = S.embedding_model || "default";
+  $("#drop-settings").textContent = `chunks ${S.chunk_size} / overlap ${S.chunk_overlap}`;
+}
+
+async function loadOptions(){
+  try{
+    OPT = await (await fetch("/v1/options")).json();
+    const saved = store.get("documind.settings") || {};
+    const d = defaults();
+    S = {...d};
+    for(const key of Object.keys(d)) if(saved[key] !== undefined && saved[key] !== null) S[key] = saved[key];
+    // a saved model that the server no longer allows falls back to the default
+    if(OPT.knowledge && !OPT.knowledge.embedding_models.includes(S.embedding_model)) S.embedding_model = d.embedding_model;
+    if(!OPT.agent.llm_models.includes(S.llm_model)) S.llm_model = d.llm_model;
+    renderSettings(); updateBadges();
+  }catch(e){ $("#settings").innerHTML = `<div class="warn">Could not load options: ${esc(e)}</div>`; }
+}
+
+/* ---------------- info badge ---------------- */
+async function loadInfo(){
+  try{
+    const i = await (await fetch("/v1/info")).json();
+    $("#served").innerHTML = `<span class="pill">agent ${esc(i.version)}</span>`+
+      `<span class="pill track-${esc(i.track)}">${esc(i.track)}</span>`+
+      `<span class="pill">default ${esc(i.model)}</span>`;
+  }catch(e){ $("#served").textContent = "agent-service unreachable"; }
+}
+
+/* ---------------- documents ---------------- */
+const kbParam = () => S.embedding_model ? `embedding_model=${encodeURIComponent(S.embedding_model)}` : "";
+
+async function loadDocs(){
+  const ul = $("#docs");
+  try{
+    const r = await fetch(`${API}?${kbParam()}`);
+    if(!r.ok) throw new Error((await r.json()).detail || r.status);
+    const docs = await r.json();
+    $("#doc-count").textContent = `${docs.length} document${docs.length===1?"":"s"}`;
+    ul.innerHTML = docs.length ? "" : `<li class="empty">No documents in this knowledge base yet. Add one above.</li>`;
+    for(const d of docs){
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="fn" title="${esc(d.filename)}">${esc(d.filename)}</span>
+        <span class="meta">${d.pages ?? "?"} page${d.pages===1?"":"s"} · ${d.total_chunks ?? "?"} chunks · size ${d.chunk_size ?? "?"}/${d.chunk_overlap ?? "?"}</span>
+        <button type="button" class="del" aria-label="Delete ${esc(d.filename)}">Delete</button>`;
+      li.querySelector(".del").onclick = async () => {
+        await fetch(`${API}/${encodeURIComponent(d.doc_id)}?${kbParam()}`, {method:"DELETE"});
+        setStatus(`Deleted ${d.filename}`); loadDocs();
+      };
+      ul.appendChild(li);
+    }
+  }catch(e){ ul.innerHTML = `<li class="empty">Knowledge base unavailable: ${esc(String(e.message||e))}</li>`; }
+}
+
+async function upload(files){
+  for(const f of files){
+    setStatus(`Indexing ${f.name}…`);
+    const fd = new FormData(); fd.append("file", f);
+    const q = new URLSearchParams({chunk_size: S.chunk_size, chunk_overlap: S.chunk_overlap});
+    if(S.embedding_model) q.set("embedding_model", S.embedding_model);
+    try{
+      const r = await fetch(`${API}?${q}`, {method:"POST", body:fd});
+      const b = await r.json().catch(() => ({}));
+      setStatus(r.ok ? `${f.name}: ${b.status}, ${b.chunks} chunks (${b.chunk_size}/${b.chunk_overlap}) in ${b.took_ms} ms`
+                     : `${f.name}: failed (${r.status}) ${b.detail || ""}`);
+    }catch(e){ setStatus(`${f.name}: ${e}`); }
+  }
+  loadDocs();
+}
+$("#pick").onclick = () => $("#file").click();
+$("#file").onchange = e => upload([...e.target.files]);
+$("#refresh").onclick = loadDocs;
+const drop = $("#drop");
+["dragenter","dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => upload([...e.dataTransfer.files]));
+
+/* ---------------- answer rendering ---------------- */
+function render(text){
+  const blocks = esc(text).split(/\n{2,}/);
+  return blocks.map(b => {
+    const lines = b.split("\n");
+    const md = s => s.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>")
+                     .replace(/\[S(\d+)\]/g,'<button type="button" class="cite" data-s="S$1">S$1</button>');
+    if(lines.every(l => /^\s*([-*]|\d+\.)\s/.test(l)))
+      return "<ul>"+lines.map(l => `<li>${md(l.replace(/^\s*([-*]|\d+\.)\s/,""))}</li>`).join("")+"</ul>";
+    return `<p>${md(lines.join("<br>"))}</p>`;
+  }).join("");
+}
+
+function botMessage(){
+  const wrap = document.createElement("div"); wrap.className = "msg bot";
+  wrap.innerHTML = `<div class="bubble"><ul class="trace"></ul><div class="answer cursor"></div><div class="sources" hidden></div><div class="footer-meta"></div></div>`;
+  $("#log").appendChild(wrap); return wrap;
+}
+
+function showSources(wrap, done){
+  const list = done.citations.length ? done.citations : done.sources;
+  if(!list.length) return;
+  const box = wrap.querySelector(".sources"); box.hidden = false;
+  box.innerHTML = list.map(s => `<details class="src" id="${wrap.dataset.id}-${s.source_id}">
+     <summary><span class="cite">${s.source_id}</span>${esc(s.filename)}, page ${s.page}<span class="sc">score ${s.score.toFixed(3)}</span></summary>
+     <blockquote>${esc(s.text)}</blockquote></details>`).join("");
+  wrap.querySelectorAll(".answer .cite").forEach(b => b.onclick = () => {
+    const d = document.getElementById(`${wrap.dataset.id}-${b.dataset.s}`);
+    if(d){ d.open = true; d.classList.add("flash"); d.scrollIntoView({block:"nearest",behavior:"smooth"}); setTimeout(()=>d.classList.remove("flash"),1200); }
+  });
+}
+
+function chatOptions(){
+  const o = {llm_model:S.llm_model, temperature:S.temperature, max_tokens:S.max_tokens, max_steps:S.max_steps,
+             prompt_version:S.prompt_version, top_k:S.top_k, score_threshold:S.score_threshold};
+  if(S.embedding_model) o.embedding_model = S.embedding_model;
+  return o;
+}
+
+/* ---------------- chat over Server-Sent Events ---------------- */
+async function ask(question){
+  $("#welcome")?.remove();
+  const u = document.createElement("div"); u.className = "msg user"; u.textContent = question; $("#log").appendChild(u);
+  const wrap = botMessage(); wrap.dataset.id = "m" + Date.now();
+  const ans = wrap.querySelector(".answer"), trace = wrap.querySelector(".trace");
+  let text = "";
+  $("#send").disabled = true;
+  try{
+    const r = await fetch("/v1/chat/stream", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({message: question, session_id: session, options: chatOptions()})});
+    if(!r.ok){ const b = await r.json().catch(()=>({})); throw new Error(typeof b.detail === "string" ? b.detail : JSON.stringify(b.detail) || `HTTP ${r.status}`); }
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    while(true){
+      const {value, done} = await reader.read(); if(done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while((i = buf.indexOf("\n\n")) >= 0){
+        const raw = buf.slice(0, i); buf = buf.slice(i + 2);
+        const type = (raw.match(/^event: (.*)$/m) || [])[1];
+        const data = JSON.parse((raw.match(/^data: (.*)$/m) || [])[1] || "{}");
+        if(type === "session"){ session = data.session_id; store.set("documind.session", session); }
+        else if(type === "step"){
+          if(data.status === "started"){
+            const li = document.createElement("li");
+            li.textContent = `→ ${data.tool}(${JSON.stringify(data.arguments)})`; trace.appendChild(li);
+          } else {
+            const li = [...trace.children].reverse().find(x => x.textContent.startsWith(`→ ${data.tool}`) && !x.dataset.done);
+            if(li){ li.dataset.done = 1; li.innerHTML = `<span class="${data.status==="ok"?"ok":"bad"}">${data.status==="ok"?"✓":"✕"}</span> ${esc(data.tool)}: ${esc(data.summary||"")} <span>(${data.ms} ms)</span>`; }
+          }
+        }
+        else if(type === "token"){ text += data.text; ans.innerHTML = render(text); }
+        else if(type === "done"){
+          ans.classList.remove("cursor"); ans.innerHTML = render(data.answer); showSources(wrap, data);
+          const st = data.settings || {};
+          wrap.querySelector(".footer-meta").innerHTML =
+            `answered by <span class="pill track-${esc(data.track)}">${esc(data.version)} ${esc(data.track)}</span> · ${esc(data.model)} · ${data.steps} step${data.steps===1?"":"s"} · ${data.usage.prompt_tokens}+${data.usage.completion_tokens} tokens · ${(data.took_ms/1000).toFixed(1)} s<br>`+
+            `temp ${st.temperature} · top-k ${st.top_k} · threshold ${st.score_threshold ?? "default"} · prompt ${esc(st.prompt_version||"")} · kb ${esc(st.embedding_model || "default")}`;
+        }
+        else if(type === "error"){ throw new Error(data.message); }
+      }
+      $("#log").scrollTop = $("#log").scrollHeight;
+    }
+  }catch(e){
+    ans.classList.remove("cursor");
+    ans.innerHTML = `<div class="error">${esc(String(e.message||e))}</div>`;
+  }finally{ $("#send").disabled = false; $("#log").scrollTop = $("#log").scrollHeight; }
+}
+
+$("#ask").onsubmit = e => { e.preventDefault(); const q = $("#q").value.trim(); if(!q) return; $("#q").value = ""; ask(q); };
+$("#q").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("#ask").requestSubmit(); } });
+document.querySelectorAll(".welcome .ex button").forEach(b => b.onclick = () => ask(b.textContent));
+$("#new").onclick = async () => {
+  if(session) await fetch(`/v1/sessions/${session}`, {method:"DELETE"}).catch(()=>{});
+  session = null; store.del("documind.session");
+  location.reload();
+};
+(async () => { loadInfo(); await loadOptions(); loadDocs(); })();
+</script>
+</body>
+</html>

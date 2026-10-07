@@ -1,0 +1,27 @@
+# kb.localtest.me          -> the ACTIVE (blue) version
+# kb-preview.localtest.me  -> the NEW (green) version while the Rollout is paused,
+#                             so you can try it in the browser before promoting
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: knowledge-service
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: kb.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: knowledge-service, port: {name: http}}
+    - host: kb-preview.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: knowledge-service-preview, port: {name: http}}

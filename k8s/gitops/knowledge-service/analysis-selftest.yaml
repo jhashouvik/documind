@@ -1,0 +1,51 @@
+# The release gate for blue-green: a Kubernetes Job that runs the self-test
+# built into the image (services/knowledge-service/app/selftest.py) against the
+# PREVIEW Service. Exit code 0 -> analysis Successful -> promotion allowed.
+# Exit code 1 -> analysis Failed -> the Rollout is ABORTED, active stays on blue.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: knowledge-selftest
+spec:
+  args:
+    - name: preview-url
+    - name: image
+    - name: min-hit-rate
+      value: "0.6"                    # hit@5 over the 14 golden questions must be >= 0.6
+  metrics:
+    - name: selftest
+      provider:
+        job:
+          metadata:
+            labels:
+              documind.io/release-gate: "true"     # the NetworkPolicy lets these pods reach knowledge-service
+          spec:
+            backoffLimit: 0                         # a failed test is a failed test - do not retry
+            activeDeadlineSeconds: 180
+            ttlSecondsAfterFinished: 600
+            template:
+              metadata:
+                labels:
+                  documind.io/release-gate: "true"
+              spec:
+                restartPolicy: Never
+                automountServiceAccountToken: false
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 10001
+                  seccompProfile: {type: RuntimeDefault}
+                containers:
+                  - name: selftest
+                    image: "{{args.image}}"        # the NEW version tests itself
+                    imagePullPolicy: IfNotPresent
+                    command: ["python", "-m", "app.selftest",
+                              "--url", "{{args.preview-url}}",
+                              "--min-results", "1",
+                              "--min-hit-rate", "{{args.min-hit-rate}}"]
+                    resources:
+                      requests: {cpu: 50m, memory: 64Mi}
+                      limits: {cpu: 250m, memory: 192Mi}
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities: {drop: ["ALL"]}
+                      readOnlyRootFilesystem: true

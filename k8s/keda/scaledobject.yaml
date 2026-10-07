@@ -1,0 +1,45 @@
+# KEDA = Kubernetes Event-Driven Autoscaling.
+# KEDA reads the triggers below and creates/updates an HPA called
+# keda-hpa-agent-service for you. The HPA then scales the Rollout as before -
+# but on signals the plain HPA cannot see.
+#
+#   trigger 1 (prometheus): chat turns in flight across all agent pods.
+#              desired replicas = ceil( in-flight / threshold )   e.g. 7 / 2 -> 4
+#   trigger 2 (cron):       at least 3 replicas during office hours (IST)
+#   KEDA takes the MAXIMUM of all triggers, bounded by min/max below.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: agent-service
+  labels: {app.kubernetes.io/name: agent-service, app.kubernetes.io/part-of: documind}
+spec:
+  scaleTargetRef:                      # any object with a /scale subresource - here the Argo Rollout
+    apiVersion: argoproj.io/v1alpha1
+    kind: Rollout
+    name: agent-service
+  minReplicaCount: 2                   # never below 2: one pod can die without an outage
+  maxReplicaCount: 6
+  pollingInterval: 15                  # seconds between trigger checks
+  cooldownPeriod: 300                  # only used when scaling to/from zero
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 120          # do not flap after a burst
+          policies: [{type: Pods, value: 1, periodSeconds: 60}]
+  triggers:
+    - type: prometheus
+      name: chat-inflight
+      metadata:
+        serverAddress: http://mon-kube-prometheus-stack-prometheus.monitoring.svc:9090
+        # max by (pod): each pod is scraped twice (stable + canary Service) - count it once
+        query: sum(max by (pod) (documind_chat_inflight{namespace="documind"}))
+        threshold: "2"                 # target: 2 concurrent chat turns per pod
+        ignoreNullValues: "true"       # no data yet = 0, not an error
+    - type: cron
+      name: office-hours
+      metadata:
+        timezone: Asia/Kolkata
+        start: 0 9 * * 1-5             # Mon-Fri 09:00
+        end: 0 19 * * 1-5              # until 19:00
+        desiredReplicas: "3"

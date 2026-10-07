@@ -1,0 +1,18 @@
+# Requires kube-prometheus-stack (Day 7, Helm release "mon", values in k8s/observability/).
+# The logs panel of the dashboard needs Loki (also Day 9).
+# Apply:  kubectl apply -k k8s/70-observability
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - servicemonitors.yaml
+  - alerts.yaml
+# The Grafana sidecar loads any ConfigMap labelled grafana_dashboard=1
+configMapGenerator:
+  - name: documind-dashboard
+    namespace: monitoring
+    files:
+      - documind.json=grafana-dashboard.json
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

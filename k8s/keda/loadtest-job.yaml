@@ -1,0 +1,58 @@
+# Day 13 load test, run INSIDE the cluster so every pod has its own IP
+# (the agent's rate limit is 20 requests/minute per client IP).
+#   kubectl create -f k8s/keda/loadtest-job.yaml      (create, not apply: generateName)
+# 6 pods x ~20 questions/minute for DURATION seconds. Cost: see the course (Day 13).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: chat-load-
+  namespace: documind
+  labels: {documind.io/load-test: "true"}
+spec:
+  parallelism: 6
+  completions: 6
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels: {documind.io/load-test: "true"}       # allowed to reach agent-service (NetworkPolicy)
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: load
+          image: documind/agent-service:1.0.0       # has Python + httpx already
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: DURATION, value: "180"}
+            - {name: TARGET, value: "http://agent-service:8002/v1/chat"}
+          command: ["python", "-c"]
+          args:
+            - |
+              import os, time, httpx
+              qs = ["What total insured value must be referred to the chief underwriter?",
+                    "Which warehouses need a full sprinkler system?",
+                    "How fast must a new claim be acknowledged?"]
+              end, i, ok, err = time.time() + int(os.environ["DURATION"]), 0, 0, 0
+              with httpx.Client(timeout=90) as c:
+                  while time.time() < end:
+                      t = time.time()
+                      try:
+                          r = c.post(os.environ["TARGET"], json={"message": qs[i % 3]})
+                          ok += r.status_code == 200; err += r.status_code != 200
+                      except Exception:
+                          err += 1
+                      i += 1
+                      time.sleep(max(0, 3.1 - (time.time() - t)))   # stay under 20/min
+              print(f"requests={i} ok={ok} errors={err}")
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+            readOnlyRootFilesystem: true

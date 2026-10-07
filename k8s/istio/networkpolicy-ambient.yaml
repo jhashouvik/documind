@@ -1,0 +1,26 @@
+# Ambient mode tunnels pod-to-pod traffic through port 15008 (HBONE) and makes
+# kubelet health probes come from 169.254.7.127. Our default-deny policy
+# (Day 4) would block both: pods would turn unready and calls would time out.
+#
+# IMPORTANT consequence: for traffic INSIDE the mesh, NetworkPolicies now only
+# see port 15008, not 6333 or 8001. Port-level control moves to Istio
+# AuthorizationPolicies (authz-l4.yaml) - which are stronger, because they check
+# the caller's cryptographic identity instead of its IP address.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ambient-mesh
+  annotations:
+    # Argo CD applies this one BEFORE the namespace label (wave 0), so probes and
+    # mesh traffic are never blocked, not even for a few seconds
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: {}                      # mesh traffic from pods of this namespace
+      ports:
+        - {protocol: TCP, port: 15008}
+    - from:
+        - ipBlock: {cidr: 169.254.7.127/32}    # kubelet health probes (SNAT by Istio CNI)

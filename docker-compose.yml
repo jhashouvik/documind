@@ -1,0 +1,52 @@
+# Local development stack: the same containers as in Kubernetes, one command.
+#   cp .env.example .env   (put your OpenRouter key in .env)
+#   docker compose up --build
+#   UI: http://localhost:8002   knowledge-service API docs: http://localhost:8001/docs
+# With tracing (Jaeger UI on http://localhost:16686):
+#   docker compose --profile tracing up --build
+name: documind
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    ports: ["6333:6333"]
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes: [qdrant_data:/qdrant/storage]
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb",
+              "--maxmemory-policy", "allkeys-lru"]
+
+  knowledge-service:
+    build: ./services/knowledge-service
+    image: documind/knowledge-service:1.0.0
+    env_file: .env                  # OPENROUTER_API_KEY (embeddings), optional EMBEDDING_MODEL
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports: ["8001:8001"]
+    depends_on: [qdrant]            # start order only; the app still retries Qdrant
+
+  agent-service:
+    build: ./services/agent-service
+    image: documind/agent-service:1.0.0
+    env_file: .env                  # OPENROUTER_API_KEY, optional LLM_MODEL
+    environment:
+      KNOWLEDGE_URL: http://knowledge-service:8001
+      REDIS_URL: redis://redis:6379/0
+      APP_URL: http://localhost:8002
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    ports: ["8002:8002"]
+    depends_on: [redis, knowledge-service]
+
+  # docker compose --profile tracing up  (and set OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 in .env)
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    profiles: [tracing]
+    environment:
+      JAEGER_LISTEN_HOST: 0.0.0.0
+    ports: ["16686:16686"]
+
+volumes:
+  qdrant_data: {}

@@ -1,0 +1,24 @@
+# Blue-green needs TWO Services with the same selector. Argo Rollouts adds
+# rollouts-pod-template-hash=<hash> to each selector at runtime:
+#   knowledge-service          -> ACTIVE revision (what agent-service calls)
+#   knowledge-service-preview  -> the NEW revision while it is being tested
+# Do not add labels like `track` to these selectors - the controller owns them.
+apiVersion: v1
+kind: Service
+metadata:
+  name: knowledge-service
+  labels: {app.kubernetes.io/name: knowledge-service, app.kubernetes.io/part-of: documind}
+spec:
+  selector: {app.kubernetes.io/name: knowledge-service}
+  ports:
+    - {name: http, port: 8001, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: knowledge-service-preview
+  labels: {app.kubernetes.io/name: knowledge-service, app.kubernetes.io/part-of: documind}
+spec:
+  selector: {app.kubernetes.io/name: knowledge-service}
+  ports:
+    - {name: http, port: 8001, targetPort: http}

@@ -1,0 +1,8 @@
+# Trace pipeline (plain manifests): kubectl apply -k k8s/observability
+# Loki, Fluent Bit and kube-prometheus-stack are Helm charts - see the *-values.yaml files.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - jaeger.yaml
+  - otel-collector.yaml

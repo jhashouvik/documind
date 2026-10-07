@@ -1,0 +1,11 @@
+# Stable in-cluster address for Service 1: http://knowledge-service:8001
+apiVersion: v1
+kind: Service
+metadata:
+  name: knowledge-service
+  namespace: documind
+  labels: {app.kubernetes.io/name: knowledge-service, app.kubernetes.io/part-of: documind}
+spec:
+  selector: {app.kubernetes.io/name: knowledge-service}
+  ports:
+    - {name: http, port: 8001, targetPort: http}

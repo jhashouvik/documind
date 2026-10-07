@@ -1,0 +1,29 @@
+# Layer 7 rules, enforced by the waypoint for MESH callers of knowledge-service.
+#  * agent-service may call everything (search, list, upload, delete via the UI)
+#  * every other identity in the namespace - e.g. the Day 8 self-test Job, which
+#    runs as ServiceAccount "default" - may only read health/options and search
+# (Callers outside the mesh - ingress-nginx, Prometheus - send plain HTTP straight
+#  to the pod and are still governed by the Day 4 NetworkPolicies.)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: knowledge-least-privilege
+spec:
+  targetRefs:
+    - {kind: Service, group: "", name: knowledge-service}
+    - {kind: Service, group: "", name: knowledge-service-preview}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/documind/sa/agent-service"]
+    - from:
+        - source:
+            namespaces: ["documind"]
+      to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/healthz", "/readyz", "/v1/options", "/v1/info"]
+        - operation:
+            methods: ["POST"]
+            paths: ["/v1/search"]

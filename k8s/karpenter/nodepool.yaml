@@ -1,0 +1,61 @@
+# Karpenter (Day 11) - simulated on kind with the KWOK provider.
+#
+# NodePool     = WHAT nodes Karpenter may create (instance families, sizes, spot /
+#                on-demand, zones, taints, limits) and WHEN to remove them.
+# KWOKNodeClass= HOW to create them. On EKS this would be an EC2NodeClass (AMI,
+#                subnets, security groups, IAM role). With KWOK the "nodes" are
+#                fake Node objects: pods scheduled there show Running, but no
+#                container really runs, so you can "launch" 64-CPU nodes on a t2.large.
+#
+# KWOK instance types look like  c-4x-amd64-linux:
+#   family c = 1 CPU : 2 GiB, s = 1 : 4, m = 1 : 8     size 1x..256x = CPUs
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: genai-burst
+spec:
+  template:
+    metadata:
+      labels:
+        documind.io/pool: genai-burst
+    spec:
+      nodeClassRef:
+        group: karpenter.kwok.sh
+        kind: KWOKNodeClass
+        name: default
+      # Only pods that TOLERATE this taint land on these nodes, so your real
+      # kind workers keep running DocuMind and the burst pool stays separate.
+      taints:
+        - key: documind.io/burst
+          value: "true"
+          effect: NoSchedule
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.sh/capacity-type        # prefer cheap spot, fall back to on-demand
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: karpenter.kwok.sh/instance-family  # on EKS: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "s"]
+        - key: karpenter.kwok.sh/instance-cpu     # no node bigger than 16 CPUs
+          operator: Lt
+          values: ["17"]
+      expireAfter: 168h                           # replace every node weekly (patching, drift)
+  limits:                                         # hard ceiling for the whole pool = cost guard-rail
+    cpu: "64"
+    memory: 256Gi
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized # repack pods onto fewer/cheaper nodes
+    consolidateAfter: 30s
+    budgets:
+      - nodes: "20%"                              # never disrupt more than 20 % of nodes at once
+---
+apiVersion: karpenter.kwok.sh/v1alpha1
+kind: KWOKNodeClass
+metadata:
+  name: default

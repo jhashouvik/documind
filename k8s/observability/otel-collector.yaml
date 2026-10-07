@@ -1,0 +1,153 @@
+# OpenTelemetry Collector = the vendor-neutral TRACE PIPELINE (pillar 3).
+#
+#   agent-service --+  OTLP/HTTP :4318             +--> Jaeger (lab)
+#                   +-----------> otel-collector --+
+#   knowledge-svc --+  receive -> process ->       +--> (EKS: AWS X-Ray, Tempo, Datadog ...)
+#
+# The apps only know "send OTLP to otel-collector.observability:4318".
+# Changing the backend = changing THIS file, not the application code.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: observability
+---
+# k8sattributes needs to read pod/namespace/replicaset metadata
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: otel-collector}
+subjects:
+  - {kind: ServiceAccount, name: otel-collector, namespace: observability}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector
+  namespace: observability
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: 0.0.0.0:4317}
+          http: {endpoint: 0.0.0.0:4318}
+
+    processors:
+      # 1. never OOM: start refusing data before the container limit is reached
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      # 2. add k8s.pod.name, k8s.namespace.name, k8s.deployment.name ... to every
+      #    span, looked up from the IP address of the pod that sent it
+      k8sattributes:
+        auth_type: serviceAccount
+        extract:
+          metadata: [k8s.namespace.name, k8s.pod.name, k8s.node.name, k8s.deployment.name]
+          labels:
+            - {tag_name: track, key: track, from: pod}
+        pod_association:
+          - sources: [{from: connection}]
+      # 3. send spans in batches (fewer, bigger requests)
+      batch:
+        send_batch_size: 512
+        timeout: 5s
+
+    exporters:
+      otlp_grpc/jaeger:
+        endpoint: jaeger.observability.svc.cluster.local:4317
+        tls: {insecure: true}          # in-cluster, lab
+      debug:
+        verbosity: basic               # one log line per batch: "TracesExporter ... spans: 12"
+
+    extensions:
+      health_check: {endpoint: 0.0.0.0:13133}
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlp_grpc/jaeger, debug]
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus: {host: 0.0.0.0, port: 8888}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: observability
+  labels: {app.kubernetes.io/name: otel-collector}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: otel-collector}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: otel-collector}
+      annotations:
+        documind.io/config-version: "1"   # bump to restart after editing the ConfigMap
+    spec:
+      serviceAccountName: otel-collector
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.161.0
+          args: ["--config=/conf/config.yaml"]
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: metrics, containerPort: 8888}
+            - {name: health, containerPort: 13133}
+          readinessProbe:
+            httpGet: {path: /, port: health}
+          livenessProbe:
+            httpGet: {path: /, port: health}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {memory: 256Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - {name: conf, mountPath: /conf}
+      volumes:
+        - name: conf
+          configMap: {name: otel-collector}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: observability
+  labels: {app.kubernetes.io/name: otel-collector}
+spec:
+  selector: {app.kubernetes.io/name: otel-collector}
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: metrics, port: 8888, targetPort: metrics}

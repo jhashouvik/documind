@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knowledge-service
+  namespace: documind
+  labels: {app.kubernetes.io/name: knowledge-service, app.kubernetes.io/part-of: documind}
+spec:
+  replicas: 1                          # the HPA takes over from here
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  selector:
+    matchLabels: {app.kubernetes.io/name: knowledge-service}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: knowledge-service
+        app.kubernetes.io/part-of: documind
+        app.kubernetes.io/version: "1.0.0"
+    spec:
+      automountServiceAccountToken: false    # this app never talks to the Kubernetes API
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:             # spread replicas over both workers
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app.kubernetes.io/name: knowledge-service}
+      containers:
+        - name: knowledge-service
+          image: documind/knowledge-service:1.0.0
+          imagePullPolicy: IfNotPresent     # the image was loaded into kind, never pull it
+          ports:
+            - {name: http, containerPort: 8001}
+          envFrom:
+            - configMapRef: {name: knowledge-config}
+          env:
+            - name: OPENROUTER_API_KEY           # same Secret as agent-service
+              valueFrom:
+                secretKeyRef: {name: documind-llm, key: OPENROUTER_API_KEY}
+          # startupProbe: at start-up the app waits for Qdrant (up to 30 x 2 s).
+          # Until this passes, liveness/readiness are not checked, so a slow start
+          # is not mistaken for a hang (up to 30 x 5 s = 150 s allowed).
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:                    # "send me traffic?" - Qdrant reachable AND API key present
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:                     # "restart me?" - process responsive
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          lifecycle:
+            # give Endpoints/ingress a moment to stop routing to this pod before
+            # uvicorn begins its graceful shutdown (avoids errors during rollouts)
+            preStop:
+              exec: {command: ["sleep", "5"]}
+          resources:
+            # embeddings are computed by OpenRouter, so the pod is small (v0.1 ran
+            # a local ONNX model and needed 512Mi-1Gi)
+            requests: {cpu: 100m, memory: 160Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+            readOnlyRootFilesystem: true      # nothing may modify the image at runtime...
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}    # ...except /tmp (upload spooling)
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}

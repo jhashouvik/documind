@@ -1,0 +1,10 @@
+# Canary release of agent-service 1.1.0 (new prompt version v2).
+# This is the MANUAL canary (Day 5). Day 8 does the same with Argo Rollouts.
+# Apply AFTER the stable stack:  kubectl apply -k k8s/60-canary
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - configmap.yaml
+  - service.yaml
+  - deployment.yaml
+  - ingress-canary.yaml

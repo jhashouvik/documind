@@ -1,0 +1,89 @@
+# kube-prometheus-stack = METRICS (pillar 2) + Grafana (the article's Step 7.3/7.4).
+# Prometheus Operator, Prometheus, Grafana, kube-state-metrics, node-exporter.
+#
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm upgrade --install mon prometheus-community/kube-prometheus-stack --version 91.8.0 \
+#     -n monitoring --create-namespace -f k8s/observability/kube-prometheus-stack-values.yaml
+#
+# The release name "mon" matters: Prometheus only picks up ServiceMonitors and
+# PrometheusRules labelled release: mon, and the Argo Rollouts analysis uses the
+# Service name mon-kube-prometheus-stack-prometheus.
+
+# ---------------------------------------------------------------- Prometheus
+prometheus:
+  prometheusSpec:
+    retention: 2d                    # lab: 2 days of metrics is plenty
+    retentionSize: 3GB
+    scrapeInterval: 30s
+    resources:
+      requests: {cpu: 100m, memory: 400Mi}
+      limits: {memory: 1200Mi}
+
+# Alertmanager routes alerts to Slack/e-mail/PagerDuty. Alerts are still
+# evaluated and visible in Prometheus and Grafana without it; off to save memory.
+alertmanager:
+  enabled: false
+
+# kind runs these control-plane parts in a way Prometheus cannot scrape (they
+# bind to 127.0.0.1), which only produces "target down" alerts. On EKS they are
+# managed by AWS and not scrapeable either.
+kubeEtcd: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeProxy: {enabled: false}
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+# ---------------------------------------------------------------- Grafana
+grafana:
+  # admin password: kubectl -n monitoring get secret mon-grafana \
+  #                   -o jsonpath='{.data.admin-password}' | base64 -d; echo
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [grafana.localtest.me]    # http://grafana.localtest.me:8080
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 384Mi}
+  # The dashboard sidecar loads every ConfigMap labelled grafana_dashboard=1
+  # (k8s/70-observability creates the DocuMind dashboard that way).
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+
+  # Prometheus is added automatically. These two make Grafana the single pane
+  # of glass over all THREE pillars, with click-through links between them:
+  #   log line with a trace_id  --(derived field)-->  the trace in Jaeger
+  #   span in Jaeger            --(traces to logs)->  the log lines of that trace
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki.observability.svc.cluster.local:3100
+      jsonData:
+        maxLines: 1000
+        derivedFields:
+          - name: TraceID
+            datasourceUid: jaeger
+            matcherRegex: '"trace_id":\s*"(\w+)"'
+            url: "$${__value.raw}"     # $$ = a literal $ in Grafana provisioning files
+            urlDisplayLabel: Open trace in Jaeger
+    - name: Jaeger
+      uid: jaeger
+      type: jaeger
+      access: proxy
+      url: http://jaeger.observability.svc.cluster.local:16686
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: "-5m"
+          spanEndTimeShift: "5m"
+          filterByTraceID: false
+          customQuery: true
+          query: '{namespace="documind"} |= "$${__trace.traceId}"'

@@ -1,0 +1,22 @@
+# ServiceMonitor = "Prometheus, please scrape the pods behind these Services".
+# kube-prometheus-stack only picks up ServiceMonitors labelled with its
+# release name (release: mon).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: documind
+  namespace: documind
+  labels:
+    release: mon
+spec:
+  selector:
+    matchExpressions:
+      - {key: app.kubernetes.io/name, operator: In, values: [knowledge-service, agent-service]}
+  namespaceSelector:
+    matchNames: [documind]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+  # copy these pod labels onto every scraped series -> compare stable vs canary
+  podTargetLabels: [track, app.kubernetes.io/version]

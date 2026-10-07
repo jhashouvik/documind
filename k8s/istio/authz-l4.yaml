@@ -1,0 +1,29 @@
+# Layer 4 identity rules, enforced by ztunnel on the node of the TARGET pod.
+# A principal is the caller's ServiceAccount, proven by its mTLS certificate:
+#   cluster.local/ns/documind/sa/knowledge-service
+# Anything not ALLOWed by a policy that selects a workload is denied.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: qdrant-only-from-knowledge
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: qdrant}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/documind/sa/knowledge-service"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: redis-only-from-agent
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: redis}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/documind/sa/agent-service"]

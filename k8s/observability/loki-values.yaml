@@ -1,0 +1,68 @@
+# Loki = the LOG store (pillar 1). Grafana's "Prometheus for logs": it indexes
+# only LABELS (namespace, pod, container, app) and stores the log lines
+# compressed, so it is cheap. You query it with LogQL in Grafana.
+#
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm upgrade --install loki grafana/loki --version 7.4.0 \
+#     -n observability --create-namespace -f k8s/observability/loki-values.yaml
+#
+# Lab set-up: ONE pod ("single binary" mode) that stores everything on its own
+# 5 GiB volume. Production (EKS): SimpleScalable/Distributed mode with S3,
+# or skip self-hosting and send logs to CloudWatch Logs instead (see Day 9).
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false            # single tenant; otherwise every client must send X-Scope-OrgID
+  commonConfig:
+    replication_factor: 1        # one copy - there is only one pod
+  storage:
+    type: filesystem             # chunks + index on the pod's PersistentVolume
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    allow_structured_metadata: true
+    volume_enabled: true
+    retention_period: 72h        # keep 3 days of logs (the compactor deletes older chunks)
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+  pattern_ingester:
+    enabled: false               # saves memory; enables "Patterns" in Grafana if true
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 5Gi                    # kind's local-path provisioner creates it on the node disk
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 768Mi}
+
+# Zero out every component of the other deployment modes
+backend: {replicas: 0}
+read: {replicas: 0}
+write: {replicas: 0}
+ingester: {replicas: 0}
+querier: {replicas: 0}
+queryFrontend: {replicas: 0}
+queryScheduler: {replicas: 0}
+distributor: {replicas: 0}
+compactor: {replicas: 0}
+indexGateway: {replicas: 0}
+bloomPlanner: {replicas: 0}
+bloomBuilder: {replicas: 0}
+bloomGateway: {replicas: 0}
+
+# Things a small lab does not need (each would cost memory)
+gateway: {enabled: false}        # nginx in front of Loki; clients talk to loki:3100 directly
+chunksCache: {enabled: false}    # memcached caches (the chunks cache alone requests GBs)
+resultsCache: {enabled: false}
+lokiCanary: {enabled: false}     # a DaemonSet that writes test logs
+test: {enabled: false}           # helm test pod (needs the canary)
