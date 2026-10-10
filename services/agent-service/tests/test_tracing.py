@@ -1,8 +1,10 @@
-"""One chat turn produces the GenAI span tree: invoke_agent > chat / execute_tool."""
+"""One chat turn produces one trace: invoke_agent > agent_node <name> spans."""
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from app.graph.state import Grades, Grounding, RouteDecision
 
 exporter = InMemorySpanExporter()
 _provider = TracerProvider()
@@ -12,15 +14,18 @@ trace.set_tracer_provider(_provider)
 
 def test_agent_turn_spans(make_client):
     exporter.clear()
-    c, *_ = make_client([("tools", [("search_knowledge_base", {"query": "TIV"})]), ("text", "ok [S1]")])
+    c, *_ = make_client({"supervisor": [RouteDecision(next="researcher", instruction="TIV"),
+                                        RouteDecision(next="writer")],
+                         "grader": [Grades(relevant=[1])], "writer": ["ok [S1]"],
+                         "grounding": [Grounding(grounded=True)]})
     c.post("/v1/chat", json={"message": "q"})
-    spans = {s.name: s for s in exporter.get_finished_spans()}
-    turn = spans["invoke_agent documind"]
-    chat = [s for s in exporter.get_finished_spans() if s.name == "chat openai/gpt-4o-mini"]
-    tool = spans["execute_tool search_knowledge_base"]
-    assert len(chat) == 2
-    assert all(s.parent.span_id == turn.context.span_id for s in chat)
-    assert chat[0].attributes["gen_ai.usage.input_tokens"] == 100
-    assert chat[0].attributes["documind.tool_calls"] == 1
-    assert tool.attributes["documind.tool.status"] == "ok"
-    assert turn.attributes["gen_ai.usage.input_tokens"] == 200 and turn.attributes["documind.steps"] == 2
+    spans = exporter.get_finished_spans()
+    turn = next(s for s in spans if s.name == "invoke_agent documind")
+    nodes = [s for s in spans if s.name.startswith("agent_node ")]
+    names = [s.name.removeprefix("agent_node ") for s in nodes]
+    for expected in ("start_turn", "supervisor", "researcher", "writer", "grounding_check", "finalize"):
+        assert expected in names
+    assert names.count("supervisor") == 2
+    assert all(s.context.trace_id == turn.context.trace_id for s in nodes)    # one trace per turn
+    assert turn.attributes["gen_ai.usage.input_tokens"] == 100
+    assert turn.attributes["documind.steps"] == 2

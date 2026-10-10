@@ -12,6 +12,7 @@ import asyncio
 import logging
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from .logging_setup import log_extra, request_id_var
 
@@ -20,6 +21,46 @@ log = logging.getLogger(__name__)
 
 class KnowledgeUnavailable(RuntimeError):
     pass
+
+
+class KnowledgeContractError(KnowledgeUnavailable):
+    """knowledge-service answered, but not in the agreed shape (e.g. after a
+    deploy of an incompatible version). A subclass of KnowledgeUnavailable, so
+    the agents degrade gracefully instead of crashing with a KeyError."""
+
+
+# ---- the contract with knowledge-service, checked on every response ---------------
+class SearchHit(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")   # new fields upstream are fine
+    doc_id: str = Field(min_length=1)
+    filename: str
+    page: int = Field(ge=1)
+    chunk_index: int = Field(ge=0)
+    score: float = Field(ge=-1, le=1)                         # cosine similarity
+    text: str
+
+
+class DocumentSummary(BaseModel):
+    model_config = ConfigDict(extra="allow")                  # the UI shows the extra fields
+    doc_id: str = Field(min_length=1)
+    filename: str
+    pages: int | None = None
+    total_chunks: int | None = None
+
+
+class _SearchResponse(BaseModel):
+    results: list[SearchHit]
+
+
+# a TypeAdapter validates types that are not a BaseModel, e.g. a bare JSON list
+_DOCUMENTS = TypeAdapter(list[DocumentSummary])
+
+
+def _contract(exc: ValidationError, what: str) -> KnowledgeContractError:
+    first = exc.errors(include_url=False)[0]
+    where = ".".join(str(x) for x in first["loc"])
+    return KnowledgeContractError(f"knowledge-service returned an unexpected {what} "
+                                  f"({where}: {first['msg']})")
 
 
 class KnowledgeClient:
@@ -55,7 +96,8 @@ class KnowledgeClient:
         raise KnowledgeUnavailable(f"knowledge-service unavailable ({err})")
 
     async def search(self, query: str, top_k: int, doc_ids: list[str] | None = None,
-                     score_threshold: float | None = None, embedding_model: str | None = None) -> list[dict]:
+                     score_threshold: float | None = None, embedding_model: str | None = None
+                     ) -> list[SearchHit]:
         body = {"query": query, "top_k": top_k}
         if doc_ids:
             body["doc_ids"] = doc_ids
@@ -66,13 +108,19 @@ class KnowledgeClient:
         resp = await self._read("POST", "/v1/search", json=body)
         if resp.status_code >= 400:          # e.g. 402 no credits, 422 unknown embedding model
             raise KnowledgeUnavailable(f"search failed (HTTP {resp.status_code}): {resp.text[:200]}")
-        return resp.json()["results"]
+        try:
+            return _SearchResponse.model_validate_json(resp.content).results
+        except ValidationError as exc:
+            raise _contract(exc, "search response") from exc
 
-    async def list_documents(self, embedding_model: str | None = None) -> list[dict]:
+    async def list_documents(self, embedding_model: str | None = None) -> list[DocumentSummary]:
         params = {"embedding_model": embedding_model} if embedding_model else None
         resp = await self._read("GET", "/v1/documents", params=params)
         resp.raise_for_status()
-        return resp.json()
+        try:
+            return _DOCUMENTS.validate_json(resp.content)
+        except ValidationError as exc:
+            raise _contract(exc, "document list") from exc
 
     # ---- pass-through used by the web UI (Backend-for-Frontend) ------------------
     async def options(self) -> dict:

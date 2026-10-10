@@ -1,4 +1,4 @@
-# Same as agent-config except the lines marked CHANGED.
+# Same as agent-config (k8s/40-agent-service) except the lines marked CHANGED.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,29 +6,49 @@ metadata:
   namespace: documind
   labels: {app.kubernetes.io/name: agent-service, app.kubernetes.io/part-of: documind, track: canary}
 data:
-  APP_VERSION: "1.1.0"                 # CHANGED
+  APP_VERSION: "2.1.0"                 # CHANGED
   TRACK: "canary"                      # CHANGED
   LOG_LEVEL: "INFO"
+
+  # --- models (OpenRouter) ---------------------------------------------------------
   # Any OpenRouter model that supports tool calling (filter by "tools" on openrouter.ai/models)
   LLM_MODEL: "openai/gpt-4o-mini"         # default in the UI
   # allow-list the UI Settings panel may pick from (per-request override)
   LLM_MODELS: "openai/gpt-4o-mini,openai/gpt-4.1-mini,meta-llama/llama-3.3-70b-instruct"
   LLM_FALLBACK_MODELS: ""                 # e.g. "meta-llama/llama-3.3-70b-instruct"
+  LLM_SMALL_MODEL: ""                     # cheaper model for grader/rewriter/memory; "" = same model
   LLM_TEMPERATURE: "0.2"
-  LLM_MAX_TOKENS: "900"
+  LLM_MAX_TOKENS: "900"                   # the writer's answer
+  LLM_AUX_MAX_TOKENS: "600"               # supervisor, planner, grader, rewriter decisions
+  LLM_JUDGE_MAX_TOKENS: "2000"            # the grounding check lists claims + quotes
   LLM_TIMEOUT_S: "60"
-  PROMPT_VERSION: "v2"                 # CHANGED: shorter, answer-first style
-  AGENT_MAX_STEPS: "5"
+
+  # --- agent graph -------------------------------------------------------------------
+  PROMPT_VERSION: "v2"                 # CHANGED: shorter, answer-first writer style
+  AGENT_MAX_STEPS: "5"                    # supervisor decisions per question
   MAX_STEPS_LIMIT: "8"                    # upper bounds for the UI sliders
   MAX_TOKENS_LIMIT: "2000"
+  MAX_QUERY_REWRITES: "1"                 # corrective RAG
+  PLANNER_MAX_SUBQUESTIONS: "4"           # parallel research branches (Send)
+  MAX_REVISIONS: "1"                      # self-RAG rewrites after a failed fact check
+  GROUNDING_CHECK: "true"
+  LONG_TERM_MEMORY: "true"
+  GRAPH_RECURSION_LIMIT: "80"
+  HISTORY_MAX_MESSAGES: "12"
+
+  # --- dependencies --------------------------------------------------------------------
   KNOWLEDGE_URL: "http://knowledge-service:8001"
   KNOWLEDGE_TIMEOUT_S: "15"
   SEARCH_TOP_K: "4"
   MAX_SEARCH_TOP_K: "10"
-  REDIS_URL: "redis://redis:6379/0"
-  SESSION_TTL_S: "86400"
-  HISTORY_MAX_MESSAGES: "12"
+  REDIS_URL: "redis://redis:6379/0"       # rate limiting only (memory is in Postgres now)
   RATE_LIMIT_PER_MINUTE: "20"
+  # DATABASE_URL is built in deployment.yaml from the documind-postgres Secret.
+  # Connections per pod; total = replicas x DB_POOL_SIZE must stay below
+  # Postgres max_connections (100): 6 pods (KEDA max) x 5 = 30.
+  DB_POOL_SIZE: "5"
+  DB_CONNECT_RETRIES: "30"                # x 2 s: Postgres may start after us
+
   APP_URL: "http://documind.localtest.me"
   # Tracing (Day 10): empty = off. TRACE_CONTENT=true also records prompts/answers (privacy!)
   OTEL_EXPORTER_OTLP_ENDPOINT: ""

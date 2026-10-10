@@ -1,5 +1,7 @@
 # During a canary the controller splits the HPA's replica count between the
 # stable and canary ReplicaSets according to setWeight.
+# CPU is a weak signal for an I/O-bound agent: see k8s/40-agent-service/hpa.yaml
+# and the KEDA component (k8s/keda) that scales on chat turns in flight.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -7,7 +9,7 @@ metadata:
 spec:
   scaleTargetRef: {apiVersion: argoproj.io/v1alpha1, kind: Rollout, name: agent-service}
   minReplicas: 2
-  maxReplicas: 4
+  maxReplicas: 6                       # 6 x DB_POOL_SIZE 5 = 30 Postgres connections
   metrics:
     - type: Resource
       resource:

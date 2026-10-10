@@ -1,0 +1,8 @@
+# Postgres for agent-service 2.0 (LangGraph checkpointer + long-term store).
+# NOTE: the Secret documind-postgres is NOT listed here (never commit passwords).
+# Create it first:  scripts/create-secrets.sh   (or `make secrets`)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - service.yaml
+  - statefulset.yaml

@@ -3,7 +3,6 @@ fastapi==0.141.1
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 pydantic-settings==2.15.0
-openai==3.19.2
 httpx==0.28.1
 redis==8.1.0
 prometheus-client==0.26.0
@@ -11,3 +10,15 @@ opentelemetry-sdk==1.45.0
 opentelemetry-exporter-otlp-proto-http==1.45.0
 opentelemetry-instrumentation-fastapi==0.66b0
 opentelemetry-instrumentation-httpx==0.66b0
+# agent framework: LangGraph (graph runtime) + LangChain (models, tools, prebuilt agents)
+langgraph==1.2.14
+langgraph-checkpoint==4.2.0
+langgraph-prebuilt==1.1.0
+langchain==1.4.4
+langchain-core==1.6.9
+langchain-openai==1.7.0
+openai==3.27.0
+# persistence: Postgres checkpointer + long-term store
+langgraph-checkpoint-postgres==3.1.2
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3

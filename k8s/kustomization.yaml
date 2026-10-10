@@ -8,5 +8,6 @@ resources:
   - 10-qdrant
   - 20-knowledge-service
   - 30-redis
+  - 35-postgres
   - 40-agent-service
   - 50-network-policies

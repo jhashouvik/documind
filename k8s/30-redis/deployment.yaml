@@ -1,6 +1,8 @@
-# Redis holds conversation memory (24 h TTL) and rate-limit counters.
-# Deliberately NOT persistent: losing it only forgets chat history, so a
-# plain Deployment with no disk is the simplest correct choice here.
+# Redis holds the rate-limit counters (agent-service 2.0 keeps conversations in
+# Postgres). Shared by all agent pods, so "20 requests/minute per IP" holds
+# cluster-wide however many replicas run. Deliberately NOT persistent: losing it
+# only resets the counters, and the limiter fails open meanwhile - so a plain
+# Deployment with no disk is the simplest correct choice here.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

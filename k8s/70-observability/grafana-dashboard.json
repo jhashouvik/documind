@@ -788,6 +788,300 @@
    "id": 16
   },
   {
+   "type": "timeseries",
+   "title": "Chat turns in flight vs agent pods (the scaling signal)",
+   "description": "In-flight turns per pod is what KEDA scales on: an agent waits on the LLM, so CPU stays low while this climbs",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 64,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum(max by (pod) (documind_chat_inflight{namespace=\"documind\"}))",
+     "legendFormat": "turns in flight",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "count(max by (pod) (documind_chat_inflight{namespace=\"documind\"}))",
+     "legendFormat": "agent pods",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    }
+   ],
+   "id": 18
+  },
+  {
+   "type": "timeseries",
+   "title": "Graph node latency p95, by node",
+   "description": "Which agent is slow? supervisor/grader/grounding = LLM decisions, researcher = search, writer = the answer",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 64,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "histogram_quantile(0.95, sum by (le, node) (rate(documind_graph_node_seconds_bucket{namespace=\"documind\"}[5m])))",
+     "legendFormat": "{{node}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    }
+   ],
+   "id": 19
+  },
+  {
+   "type": "timeseries",
+   "title": "Supervisor routing decisions per minute",
+   "description": "Where the supervisor sends work: a jump in 'writer' with few 'researcher' = answering without searching",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 72,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (next) (rate(documind_supervisor_routes_total{namespace=\"documind\"}[5m])) * 60",
+     "legendFormat": "{{next}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    }
+   ],
+   "id": 20
+  },
+  {
+   "type": "timeseries",
+   "title": "LLM decisions by Pydantic validation outcome",
+   "description": "valid / corrected (self-correction retry) / repaired (lenient) / fallback. Rising fallback = a model or budget problem",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 72,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (schema, outcome) (rate(documind_structured_outputs_total{namespace=\"documind\"}[5m])) * 60",
+     "legendFormat": "{{schema}} {{outcome}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    }
+   ],
+   "id": 21
+  },
+  {
+   "type": "timeseries",
+   "title": "Fact check (self-RAG) results per minute",
+   "description": "grounded / ungrounded (sent back to the writer) / unverified (the check produced no valid verdict)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 80,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (result) (rate(documind_grounding_checks_total{namespace=\"documind\"}[5m])) * 60",
+     "legendFormat": "{{result}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    }
+   ],
+   "id": 22
+  },
+  {
+   "type": "timeseries",
+   "title": "Human-in-the-loop decisions and graph node errors",
+   "description": "approve / reject / edit of paused actions, and node runs that raised an error",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 12,
+    "y": 80,
+    "w": 12,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "expr": "sum by (decision) (increase(documind_hitl_decisions_total{namespace=\"documind\"}[1h]))",
+     "legendFormat": "HITL {{decision}} (1h)",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    },
+    {
+     "refId": "B",
+     "expr": "sum by (node) (rate(documind_graph_node_runs_total{namespace=\"documind\", status=\"error\"}[5m])) * 60",
+     "legendFormat": "errors/min {{node}}",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     }
+    }
+   ],
+   "id": 23
+  },
+  {
    "type": "logs",
    "title": "DocuMind error logs (Loki)",
    "description": "From Fluent Bit -> Loki. Expand a line and click 'Open trace in Jaeger' next to trace_id.",
@@ -797,7 +1091,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 64,
+    "y": 88,
     "w": 24,
     "h": 10
    },

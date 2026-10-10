@@ -2,6 +2,7 @@
 #   cp .env.example .env   (put your OpenRouter key in .env)
 #   docker compose up --build
 #   UI: http://localhost:8002   knowledge-service API docs: http://localhost:8001/docs
+#   agent graph (Mermaid): http://localhost:8002/v1/graph
 # With tracing (Jaeger UI on http://localhost:16686):
 #   docker compose --profile tracing up --build
 name: documind
@@ -12,6 +13,22 @@ services:
     environment:
       QDRANT__TELEMETRY_DISABLED: "true"
     volumes: [qdrant_data:/qdrant/storage]
+
+  # LangGraph persistence for agent-service: checkpoints (short-term memory,
+  # human-in-the-loop pauses, time travel) and the long-term memory store
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: documind
+      POSTGRES_PASSWORD: documind      # local only; in Kubernetes this is a Secret
+      POSTGRES_DB: documind
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U documind -d documind"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   redis:
     image: redis:7.4-alpine
@@ -30,15 +47,19 @@ services:
 
   agent-service:
     build: ./services/agent-service
-    image: documind/agent-service:1.0.0
-    env_file: .env                  # OPENROUTER_API_KEY, optional LLM_MODEL
+    image: documind/agent-service:2.0.0
+    env_file: .env                  # OPENROUTER_API_KEY, optional LLM_MODEL / LLM_SMALL_MODEL
     environment:
       KNOWLEDGE_URL: http://knowledge-service:8001
       REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://documind:documind@postgres:5432/documind
       APP_URL: http://localhost:8002
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports: ["8002:8002"]
-    depends_on: [redis, knowledge-service]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+      knowledge-service: {condition: service_started}
 
   # docker compose --profile tracing up  (and set OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 in .env)
   jaeger:
@@ -50,3 +71,4 @@ services:
 
 volumes:
   qdrant_data: {}
+  postgres_data: {}

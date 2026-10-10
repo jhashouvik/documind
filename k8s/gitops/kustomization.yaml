@@ -2,14 +2,15 @@
 # keeps the cluster equal to it. You release by committing, not by kubectl:
 #
 #   cd k8s/gitops
-#   kustomize edit set image documind/agent-service=documind/agent-service:1.1.0
-#   git commit -am "agent 1.1.0" && git push      # Argo CD syncs, Argo Rollouts does the canary
+#   kustomize edit set image documind/agent-service=documind/agent-service:2.1.0
+#   git commit -am "agent 2.1.0" && git push      # Argo CD syncs, Argo Rollouts does the canary
 #
 # Differences from the plain manifests in k8s/20-* and k8s/40-*:
 #   * Deployments are replaced by Argo Rollouts (blue-green / canary)
 #   * ConfigMaps are GENERATED with a content hash in their name, so a config
 #     change is a new pod template = a new, safely rolled-out revision
-#   * the Secret documind-llm is NOT here (never commit secrets) - create it by hand
+#   * the Secrets documind-llm and documind-postgres are NOT here (never commit
+#     secrets) - create them with scripts/create-secrets.sh
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: documind
@@ -17,6 +18,7 @@ resources:
   - ../00-namespace
   - ../10-qdrant
   - ../30-redis
+  - ../35-postgres
   - ../50-network-policies
   - knowledge-service
   - agent-service
@@ -48,7 +50,7 @@ images:
   - name: documind/knowledge-service
     newTag: "1.0.0"
   - name: documind/agent-service
-    newTag: "1.0.0"
+    newTag: "2.0.0"
 
 # Copy the knowledge image into the self-test Job argument, so the NEW version
 # tests itself and there is still only one place to change.

@@ -4,7 +4,8 @@
     # drive knowledge-service CPU to watch the HPA scale it (free, no LLM):
     python3 scripts/loadtest.py --mode search --url http://kb.localtest.me --concurrency 8 --duration 180
 
-    # a few chat requests end-to-end (COSTS TOKENS - keep it small):
+    # a few chat requests end-to-end (COSTS TOKENS - keep it small: every request is a
+    # full agent turn of 5-10 LLM calls, and 20 requests/minute per client IP are allowed):
     python3 scripts/loadtest.py --mode chat --url http://documind.localtest.me --concurrency 2 --duration 30
 """
 import argparse

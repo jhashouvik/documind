@@ -1,7 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# NOTE: the Secret is NOT listed here. Create it with kubectl (tutorial 5.4)
-# so your API key never ends up in a file or in Git.
+# NOTE: the Secrets are NOT listed here. Create them with scripts/create-secrets.sh
+# (documind-llm + documind-postgres) so no key ends up in a file or in Git.
+# Needs: 30-redis (rate limits) and 35-postgres (memory) deployed first.
 resources:
   - configmap.yaml
   - service.yaml

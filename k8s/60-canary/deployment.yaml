@@ -1,3 +1,8 @@
+# The canary: the same agent built as 2.1.0 with the v2 writer prompt.
+# It shares Postgres with stable. ingress-nginx picks stable or canary PER
+# REQUEST (not per user), so one conversation can alternate between versions:
+# the graph STATE SCHEMA must stay compatible between versions you canary.
+# (Adding a state key is fine; renaming or removing one breaks old threads.)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +11,10 @@ metadata:
   labels: {app.kubernetes.io/name: agent-service, app.kubernetes.io/part-of: documind, track: canary}
 spec:
   replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
   selector:
     matchLabels: {app.kubernetes.io/name: agent-service, track: canary}
   template:
@@ -13,11 +22,14 @@ spec:
       labels:
         app.kubernetes.io/name: agent-service
         app.kubernetes.io/part-of: documind
-        app.kubernetes.io/version: "1.1.0"
+        app.kubernetes.io/version: "2.1.0"
         track: canary
     spec:
       automountServiceAccountToken: false
-      terminationGracePeriodSeconds: 45
+      # One question now runs 5-10 LLM calls (~10-30 s). On SIGTERM uvicorn stops
+      # accepting requests and gives running ones 60 s (--timeout-graceful-shutdown
+      # in the Dockerfile); Kubernetes must wait longer than that before SIGKILL.
+      terminationGracePeriodSeconds: 75
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -25,7 +37,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: agent-service
-          image: documind/agent-service:1.1.0
+          image: documind/agent-service:2.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8002}
@@ -35,25 +47,42 @@ spec:
             - name: OPENROUTER_API_KEY
               valueFrom:
                 secretKeyRef: {name: documind-llm, key: OPENROUTER_API_KEY}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: documind-postgres, key: POSTGRES_PASSWORD}
+            # $(VAR) expands an env var defined ABOVE in this list (Kubernetes
+            # dependent environment variables): the password stays in the Secret.
+            - name: DATABASE_URL
+              value: "postgresql://documind:$(POSTGRES_PASSWORD)@postgres:5432/documind"
+          # startup: the app waits for Postgres (DB_CONNECT_RETRIES x 2 s) before it
+          # serves anything; until /healthz answers, liveness is not checked at all
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 3
+            failureThreshold: 30           # up to 90 s
           readinessProbe:
             httpGet: {path: /readyz, port: http}
             periodSeconds: 10
+            timeoutSeconds: 3
           livenessProbe:
             httpGet: {path: /healthz, port: http}
-            initialDelaySeconds: 5
             periodSeconds: 20
+            timeoutSeconds: 3
           lifecycle:
             preStop:
+              # keep serving for 5 s while the endpoint is removed from the Service,
+              # so no new request is routed to a pod that is shutting down
               exec: {command: ["sleep", "5"]}
           resources:
-            requests: {cpu: 100m, memory: 192Mi}
-            limits: {cpu: 500m, memory: 512Mi}
+            # measured: ~115 MiB idle; each concurrent graph run adds a little
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 768Mi}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: true      # the image cannot be modified at runtime...
           volumeMounts:
-            - {name: tmp, mountPath: /tmp}
+            - {name: tmp, mountPath: /tmp}    # ...except /tmp, where uploads are spooled
       volumes:
         - name: tmp
           emptyDir: {sizeLimit: 64Mi}

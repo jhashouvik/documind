@@ -8,6 +8,10 @@
 #   (end)         -> 100 %: canary becomes the new stable, old pods scale down
 #
 # Any failed analysis ABORTS: weight back to 0, stable untouched.
+#
+# Agent-specific caveat: nginx splits PER REQUEST, and both versions share the
+# same Postgres checkpoints, so one conversation can alternate between stable
+# and canary. Keep the graph state schema backward compatible between releases.
 # Manual controls:  kubectl argo rollouts promote|abort|retry agent-service -n documind
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
@@ -60,7 +64,7 @@ spec:
     spec:
       serviceAccountName: agent-service
       automountServiceAccountToken: false
-      terminationGracePeriodSeconds: 45
+      terminationGracePeriodSeconds: 75      # > uvicorn's 60 s graceful shutdown (long agent turns)
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -78,21 +82,29 @@ spec:
             - name: OPENROUTER_API_KEY
               valueFrom:
                 secretKeyRef: {name: documind-llm, key: OPENROUTER_API_KEY}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: documind-postgres, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL                     # $(VAR) = the env var defined above
+              value: "postgresql://documind:$(POSTGRES_PASSWORD)@postgres:5432/documind"
+          startupProbe:                              # the app waits for Postgres first
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 3
+            failureThreshold: 30
           readinessProbe:
             httpGet: {path: /readyz, port: http}
             periodSeconds: 10
             timeoutSeconds: 3
           livenessProbe:
             httpGet: {path: /healthz, port: http}
-            initialDelaySeconds: 5
             periodSeconds: 20
             timeoutSeconds: 3
           lifecycle:
             preStop:
               exec: {command: ["sleep", "5"]}
           resources:
-            requests: {cpu: 100m, memory: 192Mi}
-            limits: {cpu: 500m, memory: 512Mi}
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 768Mi}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}

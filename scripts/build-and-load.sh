@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build a service image on the VM and copy it into every kind node.
 #   scripts/build-and-load.sh knowledge-service 1.0.0
-#   scripts/build-and-load.sh agent-service 1.1.0
+#   scripts/build-and-load.sh agent-service 2.0.0      # the LangGraph multi-agent version
+#   scripts/build-and-load.sh agent-service 2.1.0      # the same code tagged for the canary demo
 # kind nodes have their own container image store, separate from the VM's
 # Docker, so a freshly built image must be "kind load"-ed before pods can use it.
 set -euo pipefail

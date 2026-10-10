@@ -23,7 +23,7 @@ COPY . .
 RUN python -m pytest
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION=2.0.0
 LABEL org.opencontainers.image.title="documind-agent-service" \
       org.opencontainers.image.version="${APP_VERSION}"
 RUN groupadd --system --gid 10001 app \
@@ -38,4 +38,4 @@ COPY --chown=app:app app ./app
 USER 10001
 EXPOSE 8002
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002", \
-     "--timeout-graceful-shutdown", "25", "--no-access-log"]
+     "--timeout-graceful-shutdown", "60", "--no-access-log"]

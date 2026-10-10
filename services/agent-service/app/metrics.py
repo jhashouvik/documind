@@ -18,8 +18,20 @@ CHAT_REQUESTS = Counter("documind_chat_requests_total", "Chat turns", ["status"]
 CHAT_DURATION = Histogram("documind_chat_duration_seconds", "Full agent turn duration",
                           buckets=(0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60, 120))
 INFLIGHT = Gauge("documind_chat_inflight", "Chat turns currently being processed")
-AGENT_STEPS = Histogram("documind_agent_steps", "LLM round-trips per chat turn",
+AGENT_STEPS = Histogram("documind_agent_steps", "Supervisor decisions per chat turn",
                         buckets=(1, 2, 3, 4, 5, 6, 8, 10))
+
+# --- the agent graph ------------------------------------------------------------------
+NODE_RUNS = Counter("documind_graph_node_runs_total", "Graph node executions", ["node", "status"])
+NODE_LATENCY = Histogram("documind_graph_node_seconds", "Graph node duration", ["node"],
+                         buckets=(0.01, 0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 13, 21, 34, 60))
+ROUTES = Counter("documind_supervisor_routes_total", "Supervisor routing decisions", ["next"])
+QUERY_REWRITES = Counter("documind_crag_query_rewrites_total", "Corrective-RAG query rewrites")
+GROUNDING_CHECKS = Counter("documind_grounding_checks_total", "Self-RAG answer checks", ["result"])
+STRUCTURED_OUTPUTS = Counter("documind_structured_outputs_total",
+                             "LLM decisions by Pydantic validation outcome "
+                             "(valid | corrected | repaired | fallback)", ["schema", "outcome"])
+INTERRUPTS = Counter("documind_hitl_decisions_total", "Human-in-the-loop decisions", ["decision"])
 
 LLM_REQUESTS = Counter("documind_llm_requests_total", "LLM API calls", ["model", "status"])
 LLM_LATENCY = Histogram("documind_llm_request_seconds", "LLM call duration", ["model"],

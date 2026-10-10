@@ -1,7 +1,17 @@
-# agent-service is I/O-bound: it mostly WAITS for the LLM. CPU stays low even
-# when it is busy, so CPU is a weak scaling signal. We still use it here
-# (it catches JSON/streaming overhead at high load); tutorial Part 7 explains
-# scaling on in-flight requests with KEDA/Prometheus instead.
+# Scaling an AGENT is different from scaling a typical API:
+#
+#   agent-service is I/O-bound. A chat turn is 5-10 LLM calls of 1-5 s each,
+#   and the pod spends almost all of that time WAITING for OpenRouter. 20
+#   concurrent questions can keep CPU near 10 % while answers get slow.
+#   So CPU is a weak scaling signal for an agent.
+#
+# This HPA still uses CPU (built in, works on any cluster, catches the
+# JSON/streaming overhead at high load). The better signal - chat turns in
+# flight per pod (documind_chat_inflight) - needs Prometheus + KEDA:
+# see k8s/keda/scaledobject.yaml (Day 13).
+#
+# Scaling OUT is safe because no pod holds state (see deployment.yaml).
+# Scaling IN waits 5 minutes: a pod being removed gets 75 s to finish streams.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -10,12 +20,16 @@ metadata:
 spec:
   scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: agent-service}
   minReplicas: 2
-  maxReplicas: 4
+  maxReplicas: 6                        # 6 x DB_POOL_SIZE 5 = 30 Postgres connections
   metrics:
     - type: Resource
       resource:
         name: cpu
         target: {type: Utilization, averageUtilization: 60}
   behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{type: Pods, value: 2, periodSeconds: 30}]     # add up to 2 pods / 30 s
     scaleDown:
       stabilizationWindowSeconds: 300
+      policies: [{type: Pods, value: 1, periodSeconds: 60}]     # remove 1 pod / minute

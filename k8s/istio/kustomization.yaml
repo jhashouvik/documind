@@ -6,7 +6,7 @@ apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 resources:
   - networkpolicy-ambient.yaml       # FIRST: let mesh traffic (port 15008) and probes through
-  - authz-l4.yaml                    # identity rules enforced by ztunnel (Qdrant, Redis)
+  - authz-l4.yaml                    # identity rules enforced by ztunnel (Qdrant, Redis, Postgres)
   - waypoint.yaml                    # an L7 proxy for knowledge-service
   - authz-l7.yaml                    # path/method rules enforced by the waypoint
   - httproute-timeouts.yaml          # timeouts as configuration, not code

@@ -101,6 +101,20 @@ header button{background:none;border:1px solid var(--line);color:var(--ink);bord
 .trace{margin:0 0 10px;padding:0;list-style:none;font-family:var(--mono);font-size:12px;color:var(--muted)}
 .trace li{padding:2px 0}
 .trace .ok{color:var(--stable)}.trace .bad{color:var(--err)}
+.trace .ag{display:inline-block;min-width:84px;font-weight:500;color:var(--ink)}
+.trace li.st-error .mark{color:var(--err)}.trace li.st-ok .mark{color:var(--stable)}.trace li.st-info .mark{color:var(--cite)}
+.revise{font-family:var(--mono);font-size:11.5px;color:var(--cite);margin:0 0 6px}
+.approval{border:1px solid var(--cite);background:var(--cite-bg);border-radius:10px;padding:10px 14px;margin:6px 0 10px}
+.approval b{display:block;color:var(--cite);margin-bottom:4px}
+.approval code{font-family:var(--mono);font-size:12px;word-break:break-all}
+.approval .row{display:flex;gap:8px;margin-top:10px}
+.approval button{border-radius:8px;padding:6px 14px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.approval button.yes{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink);max-width:min(1000px,94vw);width:100%;padding:0}
+dialog::backdrop{background:rgba(5,10,20,.55)}
+dialog header{border-bottom:1px solid var(--line)}
+#graph-body{padding:16px 22px;overflow:auto;max-height:75vh}
+#graph-body pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin:0}
 .sources{margin-top:12px;border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:6px}
 .src{font-size:13px;border:1px solid var(--line);border-radius:9px;padding:7px 10px}
 .src summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:baseline}
@@ -148,18 +162,24 @@ form button:disabled{opacity:.5;cursor:default}
 <main>
   <header>
     <div class="served" id="served">connecting…</div>
-    <button type="button" id="new">New conversation</button>
+    <div><button type="button" id="show-graph">Agent graph</button> <button type="button" id="new">New conversation</button></div>
   </header>
+  <dialog id="graph-dlg" aria-labelledby="graph-title">
+    <header><b id="graph-title">How the agents are wired (LangGraph)</b><button type="button" id="graph-close">Close</button></header>
+    <div id="graph-body">Loading…</div>
+  </dialog>
   <div id="log" aria-live="polite">
     <div class="welcome" id="welcome">
       <h2>What do you want to know?</h2>
-      Upload documents on the left, then ask a question. DocuMind searches them, answers with
-      citations you can click, and shows each step the agent took. Tune chunking, retrieval and the
-      model in <b>Settings</b>.
+      Upload documents on the left, then ask a question. A supervisor agent routes your question to
+      specialist agents (researcher, planner, analyst, librarian), a writer answers with citations you
+      can click, and a fact checker verifies the answer. Every step is shown live. Tune chunking,
+      retrieval and the model in <b>Settings</b>.
       <div class="ex">
         <button type="button">What total insured value must be referred to the chief underwriter?</button>
         <button type="button">How fast must we acknowledge a first notice of loss, and who handles claims above USD 1 million?</button>
         <button type="button">If the deductible is 2% of a USD 40 million TIV, how much is it?</button>
+        <button type="button">Which documents are in the knowledge base?</button>
       </div>
     </div>
   </div>
@@ -178,6 +198,9 @@ const store = {
   del(k){ try{ localStorage.removeItem(k); }catch(e){} },
 };
 let session = store.get("documind.session");
+// a stable anonymous id for long-term memory (facts the agents remember across conversations)
+let USER = store.get("documind.user");
+if(!USER){ USER = "u-" + Math.random().toString(36).slice(2, 12) + Date.now().toString(36); store.set("documind.user", USER); }
 let OPT = null;               // options from /v1/options
 let S = {};                   // current settings
 
@@ -247,7 +270,7 @@ function renderSettings(){
       ${select("llm_model","LLM model", a.llm_models, "Must support tool calling. Price and quality differ per model.")}
       ${range("temperature","Temperature", a.temperature, "0 = deterministic, higher = more varied wording.", v => Number(v).toFixed(1))}
       ${range("max_tokens","Max answer tokens", a.max_tokens, "Upper bound on output length (and output cost).")}
-      ${range("max_steps","Max agent steps", a.max_steps, "LLM round trips per question; each step costs tokens.")}
+      ${range("max_steps","Max supervisor steps", a.max_steps, "How many workers the supervisor may call per question; each step costs tokens.")}
       <div class="ctl"><label>Prompt style</label>
         <div class="seg">${a.prompt_versions.map(v => `<button type="button" data-pv="${v}" aria-pressed="${v===S.prompt_version}">${v==="v1"?"v1 · detailed":"v2 · concise"}</button>`).join("")}</div></div>
     </fieldset>
@@ -302,7 +325,8 @@ async function loadInfo(){
     const i = await (await fetch("/v1/info")).json();
     $("#served").innerHTML = `<span class="pill">agent ${esc(i.version)}</span>`+
       `<span class="pill track-${esc(i.track)}">${esc(i.track)}</span>`+
-      `<span class="pill">default ${esc(i.model)}</span>`;
+      `<span class="pill">default ${esc(i.model)}</span>`+
+      `<span class="pill">${esc(i.engine)} · ${esc(i.persistence)}</span>`;
   }catch(e){ $("#served").textContent = "agent-service unreachable"; }
 }
 
@@ -398,12 +422,47 @@ async function ask(question){
   $("#welcome")?.remove();
   const u = document.createElement("div"); u.className = "msg user"; u.textContent = question; $("#log").appendChild(u);
   const wrap = botMessage(); wrap.dataset.id = "m" + Date.now();
+  await runStream(wrap, "/v1/chat/stream", {message: question, session_id: session, user_id: USER, options: chatOptions()});
+}
+
+const MARK = {ok: "✓", error: "✕", info: "•"};
+function addStep(trace, d){
+  const li = document.createElement("li"); li.className = `st-${d.status || "ok"}`;
+  li.innerHTML = `<span class="mark">${MARK[d.status] || "•"}</span> <span class="ag">${esc(d.agent)}</span> ${esc(d.action)}${d.detail ? " · " + esc(d.detail) : ""}`;
+  trace.appendChild(li);
+}
+
+function showApproval(wrap, data){
+  const box = document.createElement("div"); box.className = "approval";
+  const acts = data.actions.map(a => `<div>${esc(a.description || a.name)}<br><code>${esc(a.name)}(${esc(JSON.stringify(a.args))})</code></div>`).join("");
+  box.innerHTML = `<b>Approval needed: the agents paused before acting</b>${acts}
+    <div class="row"><button type="button" class="yes">Approve</button><button type="button" class="no">Reject</button></div>`;
+  wrap.querySelector(".answer").before(box);
+  const decide = decision => {
+    box.innerHTML = `<b>${decision === "approve" ? "Approved" : "Rejected"}, resuming from the checkpoint…</b>`;
+    runStream(wrap, "/v1/chat/resume/stream", {session_id: data.session_id, decision});
+  };
+  box.querySelector(".yes").onclick = () => decide("approve");
+  box.querySelector(".no").onclick = () => decide("reject");
+}
+
+function footer(wrap, data){
+  const st = data.settings || {};
+  const agents = [...new Set((data.findings || []).map(f => f.agent))];
+  const checked = data.grounded === true ? "fact-checked ✓" : data.grounded === false ? "fact check failed" : "no fact check";
+  wrap.querySelector(".footer-meta").innerHTML =
+    `answered by <span class="pill track-${esc(data.track)}">${esc(data.version)} ${esc(data.track)}</span> · ${esc(data.model)} · ${data.steps} supervisor step${data.steps===1?"":"s"} · ${data.llm_calls} LLM calls · ${data.usage.prompt_tokens}+${data.usage.completion_tokens} tokens · ${(data.took_ms/1000).toFixed(1)} s<br>`+
+    `agents: ${esc(agents.join(", ") || "writer")}${data.plan && data.plan.length ? ` · plan: ${data.plan.length} parallel sub-questions` : ""} · ${checked}${data.drafts > 1 ? ` · ${data.drafts} drafts` : ""}<br>`+
+    `temp ${st.temperature} · top-k ${st.top_k} · threshold ${st.score_threshold ?? "default"} · prompt ${esc(st.prompt_version||"")} · kb ${esc(st.embedding_model || "default")}`;
+}
+
+async function runStream(wrap, url, body){
   const ans = wrap.querySelector(".answer"), trace = wrap.querySelector(".trace");
-  let text = "";
+  let text = "", draft = 1;
+  ans.classList.add("cursor");
   $("#send").disabled = true;
   try{
-    const r = await fetch("/v1/chat/stream", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({message: question, session_id: session, options: chatOptions()})});
+    const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
     if(!r.ok){ const b = await r.json().catch(()=>({})); throw new Error(typeof b.detail === "string" ? b.detail : JSON.stringify(b.detail) || `HTTP ${r.status}`); }
     const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
     while(true){
@@ -415,22 +474,18 @@ async function ask(question){
         const type = (raw.match(/^event: (.*)$/m) || [])[1];
         const data = JSON.parse((raw.match(/^data: (.*)$/m) || [])[1] || "{}");
         if(type === "session"){ session = data.session_id; store.set("documind.session", session); }
-        else if(type === "step"){
-          if(data.status === "started"){
-            const li = document.createElement("li");
-            li.textContent = `→ ${data.tool}(${JSON.stringify(data.arguments)})`; trace.appendChild(li);
-          } else {
-            const li = [...trace.children].reverse().find(x => x.textContent.startsWith(`→ ${data.tool}`) && !x.dataset.done);
-            if(li){ li.dataset.done = 1; li.innerHTML = `<span class="${data.status==="ok"?"ok":"bad"}">${data.status==="ok"?"✓":"✕"}</span> ${esc(data.tool)}: ${esc(data.summary||"")} <span>(${data.ms} ms)</span>`; }
+        else if(type === "step"){ addStep(trace, data); }
+        else if(type === "token"){
+          if(data.draft !== draft){          // the fact checker sent the answer back: start over
+            draft = data.draft; text = "";
+            const note = document.createElement("div"); note.className = "revise";
+            note.textContent = `draft ${draft}: rewriting after the fact check`; ans.before(note);
           }
+          text += data.text; ans.innerHTML = render(text);
         }
-        else if(type === "token"){ text += data.text; ans.innerHTML = render(text); }
+        else if(type === "interrupt"){ ans.classList.remove("cursor"); showApproval(wrap, data); }
         else if(type === "done"){
-          ans.classList.remove("cursor"); ans.innerHTML = render(data.answer); showSources(wrap, data);
-          const st = data.settings || {};
-          wrap.querySelector(".footer-meta").innerHTML =
-            `answered by <span class="pill track-${esc(data.track)}">${esc(data.version)} ${esc(data.track)}</span> · ${esc(data.model)} · ${data.steps} step${data.steps===1?"":"s"} · ${data.usage.prompt_tokens}+${data.usage.completion_tokens} tokens · ${(data.took_ms/1000).toFixed(1)} s<br>`+
-            `temp ${st.temperature} · top-k ${st.top_k} · threshold ${st.score_threshold ?? "default"} · prompt ${esc(st.prompt_version||"")} · kb ${esc(st.embedding_model || "default")}`;
+          ans.classList.remove("cursor"); ans.innerHTML = render(data.answer); showSources(wrap, data); footer(wrap, data);
         }
         else if(type === "error"){ throw new Error(data.message); }
       }
@@ -441,6 +496,22 @@ async function ask(question){
     ans.innerHTML = `<div class="error">${esc(String(e.message||e))}</div>`;
   }finally{ $("#send").disabled = false; $("#log").scrollTop = $("#log").scrollHeight; }
 }
+
+/* ---------------- agent graph viewer ---------------- */
+$("#show-graph").onclick = async () => {
+  const dlg = $("#graph-dlg"), body = $("#graph-body");
+  dlg.showModal();
+  try{
+    const {mermaid: text} = await (await fetch("/v1/graph")).json();
+    body.innerHTML = `<pre>${esc(text)}</pre>`;
+    const mermaid = (await import("https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs")).default;
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    mermaid.initialize({startOnLoad: false, theme: dark ? "dark" : "default"});
+    const {svg} = await mermaid.render("agent-graph", text);
+    body.innerHTML = svg;
+  }catch(e){ if(!body.querySelector("pre")) body.textContent = `Could not load the graph: ${e}`; }
+};
+$("#graph-close").onclick = () => $("#graph-dlg").close();
 
 $("#ask").onsubmit = e => { e.preventDefault(); const q = $("#q").value.trim(); if(!q) return; $("#q").value = ""; ask(q); };
 $("#q").addEventListener("keydown", e => { if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); $("#ask").requestSubmit(); } });

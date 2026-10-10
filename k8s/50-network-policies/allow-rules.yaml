@@ -1,6 +1,6 @@
 # Who may talk to whom:
 #   ingress-nginx  -> agent-service (8002), knowledge-service (8001, test Ingress)
-#   agent-service  -> knowledge-service (8001), redis (6379)
+#   agent-service  -> knowledge-service (8001), redis (6379), postgres (5432)
 #   knowledge-svc  -> qdrant (6333/6334)
 #   monitoring     -> both services (metrics)
 #   release-gate   -> knowledge-service (the Argo Rollouts analysis Job, Day 8)
@@ -79,3 +79,20 @@ spec:
             matchLabels: {app.kubernetes.io/name: agent-service}
       ports:
         - {protocol: TCP, port: 6379}
+---
+# Only agent-service may reach the agent's memory (checkpoints, long-term store).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-agent
+  namespace: documind
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: postgres}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: agent-service}     # stable AND canary
+      ports:
+        - {protocol: TCP, port: 5432}

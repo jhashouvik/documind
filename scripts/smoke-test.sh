@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end smoke test of a deployed DocuMind. Exit code 0 = healthy.
-#   scripts/smoke-test.sh            # uses 1 LLM call (a few cents at most)
+#   scripts/smoke-test.sh            # uses 2 questions = ~10 LLM calls (a few cents at most)
 set -uo pipefail
 KB="${KB_URL:-http://kb.localtest.me}"
 AG="${AGENT_URL:-http://documind.localtest.me}"
@@ -18,9 +18,13 @@ check "metrics"          "curl -fsS ${KB}/metrics | grep -q documind_search_seco
 echo "agent-service (${AG})"
 check "healthz"          "curl -fsS ${AG}/healthz"
 check "readyz"           "curl -fsS ${AG}/readyz"
+check "not degraded"     "curl -fsS ${AG}/readyz | grep -q '\"degraded\":\[\]'"           # Redis + Postgres reachable
+check "langgraph+postgres" "curl -fsS ${AG}/v1/info | grep -q '\"persistence\":\"postgres\"'"
+check "agent graph"      "curl -fsS ${AG}/v1/graph | grep -q supervisor"
+check "event schema"     "curl -fsS ${AG}/v1/events/schema | grep -q discriminator"
 check "UI served"        "curl -fsS ${AG}/ | grep -q DocuMind"
 check "UI options"       "curl -fsS ${AG}/v1/options | grep -q llm_models"
 check "BFF lists docs"   "curl -fsS ${AG}/api/knowledge/v1/documents"
-check "chat answers"     "curl -fsS -X POST ${AG}/v1/chat -H 'Content-Type: application/json' -d '{\"message\":\"What TIV must be referred to the chief underwriter?\"}' | grep -q answer"
-check "streaming"        "curl -fsSN -X POST ${AG}/v1/chat/stream -H 'Content-Type: application/json' -d '{\"message\":\"hello\"}' --max-time 60 | grep -q 'event: done'"
+check "chat answers"     "curl -fsS --max-time 120 -X POST ${AG}/v1/chat -H 'Content-Type: application/json' -d '{\"message\":\"What TIV must be referred to the chief underwriter?\"}' | grep -q '\"status\":\"done\"'"
+check "streaming"        "curl -fsSN -X POST ${AG}/v1/chat/stream -H 'Content-Type: application/json' -d '{\"message\":\"hello\"}' --max-time 120 | grep -q 'event: done'"
 exit $fail

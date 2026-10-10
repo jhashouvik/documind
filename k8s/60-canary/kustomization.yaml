@@ -1,4 +1,5 @@
-# Canary release of agent-service 1.1.0 (new prompt version v2).
+# Canary release of agent-service 2.1.0 (writer prompt v2) next to stable 2.0.0.
+# Build it first:  make build-agent-canary
 # This is the MANUAL canary (Day 5). Day 8 does the same with Argo Rollouts.
 # Apply AFTER the stable stack:  kubectl apply -k k8s/60-canary
 apiVersion: kustomize.config.k8s.io/v1beta1

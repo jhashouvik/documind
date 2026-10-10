@@ -5,6 +5,9 @@
 #
 #   trigger 1 (prometheus): chat turns in flight across all agent pods.
 #              desired replicas = ceil( in-flight / threshold )   e.g. 7 / 2 -> 4
+#              THE right signal for an agent: a turn of the LangGraph agent holds a
+#              request open for 10-30 s (5-10 LLM calls) while CPU stays low, so
+#              "how many turns are running" says far more than CPU %.
 #   trigger 2 (cron):       at least 3 replicas during office hours (IST)
 #   KEDA takes the MAXIMUM of all triggers, bounded by min/max below.
 apiVersion: keda.sh/v1alpha1

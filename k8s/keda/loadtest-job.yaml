@@ -1,7 +1,11 @@
 # Day 13 load test, run INSIDE the cluster so every pod has its own IP
 # (the agent's rate limit is 20 requests/minute per client IP).
 #   kubectl create -f k8s/keda/loadtest-job.yaml      (create, not apply: generateName)
-# 6 pods x ~20 questions/minute for DURATION seconds. Cost: see the course (Day 13).
+# 6 pods x up to ~20 questions/minute for DURATION seconds.
+# COST: agent-service 2.0 makes 5-10 LLM calls per question (supervisor, grader,
+# writer, fact check...), so 3 minutes is several hundred questions = a few
+# thousand LLM calls. With gpt-4o-mini that is still well under 1 USD, but
+# check your OpenRouter credits first. Lower DURATION/parallelism to save.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -25,7 +29,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: load
-          image: documind/agent-service:1.0.0       # has Python + httpx already
+          image: documind/agent-service:2.0.0       # has Python + httpx already
           imagePullPolicy: IfNotPresent
           env:
             - {name: DURATION, value: "180"}
@@ -42,6 +46,7 @@ spec:
                   while time.time() < end:
                       t = time.time()
                       try:
+                          # each turn takes 10-30 s, so a pod naturally sends ~2-5 per minute
                           r = c.post(os.environ["TARGET"], json={"message": qs[i % 3]})
                           ok += r.status_code == 200; err += r.status_code != 200
                       except Exception:

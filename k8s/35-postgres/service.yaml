@@ -1,0 +1,25 @@
+# postgres          -> what agent-service connects to (DATABASE_URL host "postgres")
+# postgres-headless -> the StatefulSet's governing Service: gives the pod the stable
+#                      DNS name postgres-0.postgres-headless.documind.svc
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: documind
+  labels: {app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: documind}
+spec:
+  selector: {app.kubernetes.io/name: postgres}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-headless
+  namespace: documind
+  labels: {app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: documind}
+spec:
+  clusterIP: None
+  selector: {app.kubernetes.io/name: postgres}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}

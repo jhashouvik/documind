@@ -27,3 +27,16 @@ spec:
     - from:
         - source:
             principals: ["cluster.local/ns/documind/sa/agent-service"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: postgres-only-from-agent
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: postgres}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/documind/sa/agent-service"]

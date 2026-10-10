@@ -39,6 +39,32 @@ spec:
           labels: {severity: page}
           annotations:
             summary: "No knowledge-service pod is ready - the agent cannot search documents"
+        # ---- the agent graph (agent-service 2.0) ----
+        - alert: DocuMindStructuredOutputFallbacks
+          expr: |
+            sum(rate(documind_structured_outputs_total{namespace="documind", outcome="fallback"}[15m]))
+              / clamp_min(sum(rate(documind_structured_outputs_total{namespace="documind"}[15m])), 0.001) > 0.10
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "Over 10% of LLM decisions fail Pydantic validation even after a retry"
+            runbook: "Check `docker/kubectl logs` for 'structured output rejected': a weak model, or an output budget too small (LLM_AUX/JUDGE_MAX_TOKENS)"
+        - alert: DocuMindFactCheckUnverified
+          expr: sum(rate(documind_grounding_checks_total{namespace="documind", result="unverified"}[30m])) > 0
+          for: 30m
+          labels: {severity: warning}
+          annotations:
+            summary: "Answers are going out NOT fact-checked (the grounding check produced no valid verdict)"
+        - alert: DocuMindAgentSaturated
+          # turns in flight per pod stay high although the autoscaler is at its maximum
+          expr: |
+            sum(max by (pod) (documind_chat_inflight{namespace="documind"}))
+              / count(max by (pod) (documind_chat_inflight{namespace="documind"})) > 4
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: "More than 4 chat turns in flight per agent pod for 10 minutes"
+            runbook: "Autoscaler at maxReplicas? Raise it (and DB_POOL_SIZE x replicas vs Postgres max_connections), or check OpenRouter latency"
         - alert: DocuMindSlowFirstToken
           expr: |
             histogram_quantile(0.95, sum by (le) (rate(documind_llm_time_to_first_token_seconds_bucket{namespace="documind"}[10m]))) > 3
