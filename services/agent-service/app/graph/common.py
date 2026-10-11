@@ -3,6 +3,7 @@ prompt formatting and per-node tracing/metrics."""
 import functools
 import logging
 import time
+from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langgraph.config import get_stream_writer
@@ -127,30 +128,64 @@ def _new_text(p: dict, kept: dict[tuple[str, int], str]) -> str:
     return text.strip()
 
 
-def numbered_sources(sources: dict | None, max_n: int, max_chars: int) -> list[dict]:
+@dataclass
+class SourceSelection:
+    """What the writer (and analyst, fact checker) is actually shown."""
+    numbered: list[dict]
+    total: int          # relevant passages the researchers handed over
+    duplicates: int     # skipped: a neighbour chunk already shows this text (no loss)
+    dropped: int        # NOT shown: passage limit or text budget reached
+    cut: int            # shown, but truncated to fit the budget
+
+    @property
+    def lossy(self) -> bool:
+        return bool(self.dropped or self.cut)
+
+    def describe(self) -> str:
+        return (f"saw {len(self.numbered)} of {self.total} passages"
+                + (f", {self.dropped} dropped" if self.dropped else "")
+                + (f", {self.cut} truncated" if self.cut else "")
+                + " (WRITER_MAX_SOURCES / TOOL_RESULT_MAX_CHARS)")
+
+
+def select_sources(sources: dict | None, max_n: int, max_chars: int) -> SourceSelection:
     """Best passages first, numbered S1..Sn, total text bounded by max_chars.
     Text that a better-ranked neighbour chunk already shows is removed, so the
-    writer never sees (and cites) the same sentences twice.
+    writer never sees (and cites) the same sentences twice. Anything that does
+    not fit is COUNTED, so the handoff researcher -> writer is never silently lossy.
     Deterministic, so the writer, the grounding check and the final response
     all agree on which passage is S1."""
     ranked = sorted((sources or {}).values(), key=lambda p: (-p["score"], p["key"]))
-    out, used, kept = [], 0, {}
+    out, used, kept, duplicates, cut = [], 0, {}, 0, 0
     for p in ranked:
-        if len(out) >= max_n:
+        if len(out) >= max_n or used >= max_chars:
             break
         text = _new_text(p, kept)
         if len(text) < MIN_NEW_CHARS and len(text) < len(p["text"]):
-            continue                                  # only repeated its neighbour
+            duplicates += 1                           # only repeated its neighbour
+            continue
         kept[(p["doc_id"], p["chunk_index"])] = p["text"]
-        i = len(out) + 1
         if used + len(text) > max_chars:
-            text = text[: max(0, max_chars - used)]
+            text, cut = text[: max(0, max_chars - used)], cut + 1
         used += len(text)
-        out.append({"source_id": f"S{i}", "doc_id": p["doc_id"], "filename": p["filename"],
+        out.append({"source_id": f"S{len(out) + 1}", "doc_id": p["doc_id"], "filename": p["filename"],
                     "page": p["page"], "score": p["score"], "text": text})
-        if used >= max_chars:
-            break
-    return out
+    dropped = len(ranked) - len(out) - duplicates
+    return SourceSelection(out, len(ranked), duplicates, dropped, cut)
+
+
+def numbered_sources(sources: dict | None, max_n: int, max_chars: int) -> list[dict]:
+    return select_sources(sources, max_n, max_chars).numbered
+
+
+def format_evidence(sources: dict | None, n: int = 6, chars: int = 220) -> str:
+    """Short excerpts of the best passages for the SUPERVISOR. With only a count
+    ("3 relevant passages") it would decide "enough information" blind."""
+    ranked = sorted((sources or {}).values(), key=lambda p: (-p["score"], p["key"]))[:n]
+    if not ranked:
+        return "(no passages yet)"
+    return "\n".join(f"- {p['filename']} p.{p['page']} (score {p['score']:.2f}): "
+                     f"{' '.join(p['text'].split())[:chars]}..." for p in ranked)
 
 
 def format_sources(sources: list[dict]) -> str:
@@ -162,7 +197,9 @@ def format_sources(sources: list[dict]) -> str:
 def format_findings(findings: list[dict] | None) -> str:
     if not findings:
         return "(none yet)"
-    return "\n".join(f"- [{f['agent']}] {f['task']} -> {f['result']}" for f in findings)
+    # .get(): findings from checkpoints of an older version have no status
+    return "\n".join(f"- [{f['agent']} | {f.get('status', 'ok')}] {f['task']} -> {f['result']}"
+                     for f in findings)
 
 
 def node(name: str):

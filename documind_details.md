@@ -894,7 +894,7 @@ c, hub, seen, _ = make_client({
 })
 ```
 
-There are 78 tests (18 of them for Pydantic, section 11). They cover every pattern: routing, corrective RAG, parallel planning, the
+There are 95 tests (18 for Pydantic, section 11; 17 for agent handoffs, section 13). They cover every pattern: routing, corrective RAG, parallel planning, the
 analyst's tool calls, self-RAG revision, approve/reject with resume, the checkpointer, the store,
 replay, failures, streaming and the API guardrails. Run them with `make test` (inside Docker) or
 `python -m pytest` in `services/agent-service`.
@@ -1279,3 +1279,103 @@ With kube-prometheus-stack installed, `make deploy-observability` adds:
 
 All manifests render with `kubectl kustomize` and pass `kubeconform -strict` (67 objects,
 including GitOps with the KEDA + Istio components).
+
+---
+
+## 13. Communication between agents: failure points and how they're detected
+
+The agents never call each other. They **write fields of the shared LangGraph state** that the next
+agent reads. A handoff can lose information without any error: the HTTP response is still 200 and
+the answer still sounds fluent. This section lists every handoff, what can go wrong, and how
+DocuMind now makes it visible. The code is in [handoffs.py](services/agent-service/app/graph/handoffs.py).
+
+### 13.1 The handoffs
+
+| From → to | What is passed | State field | Typed as |
+|-----------|----------------|-------------|----------|
+| supervisor → worker | a one-line task | `instruction` | `RouteDecision` (validated) |
+| supervisor → writer | a brief ("give the hours too") | `writer_brief` (**new**) | `RouteDecision` |
+| researcher → supervisor | a report | `findings[]` | `Finding`: status `ok / empty / partial / error` + `data` |
+| researcher → writer, analyst, fact checker | the passages | `sources` | `SourceSelection` (counts what is dropped) |
+| grader → researcher | which passages are relevant | inside the subgraph | `Grades` (validated) |
+| analyst / librarian → supervisor | the sub-agent's final message | `findings[]` | `Finding`, checked by `sub_agent_report()` |
+| fact checker → writer | the rejected claims | `feedback` | `Grounding` (validated) |
+| any → the answer | what went wrong | `issues[]` (**new**) | `HandoffIssue` |
+
+### 13.2 Failure points, before and after
+
+| # | Failure point | Before | Now: issue `kind` |
+|---|---------------|--------|-------------------|
+| 1 | The supervisor got only a count ("3 relevant passages") | decided "enough" blind | it now sees **excerpts** of the 6 best passages, plus each finding's status |
+| 2 | Passages over the writer's budget were cut without notice; the old 6,000 characters fit only ~3 PDF chunks | silent | budget 16,000; anything dropped or cut is reported: `truncated` |
+| 3 | The supervisor's instruction to the writer was never read | dropped | delivered as `writer_brief`; a stale worker instruction can never become the brief |
+| 4 | A sub-agent stopped by its call limit passed **"Model call limits exceeded…"** on as its report | silent | status `partial`, report "INCOMPLETE: …" + its last tool results: `partial_report` |
+| 5 | The supervisor gave a worker no task | worker silently used the whole question | `empty_instruction` |
+| 6 | The same task again in slightly different words | burned steps until the limit | the validator rejects it (word-overlap similarity); safety net: `repeated_task` |
+| 7 | The grader's verdict was unusable | all passages kept, no trace | `grader_fallback` |
+| 8 | A search failed / found nothing | only in the trace | finding status `error` / `empty` + `search_failed` / `no_evidence` |
+| 9 | No valid routing decision | defaulted to the writer quietly | `fallback_decision` |
+| 10 | The fact check produced no verdict | shown as "not verified" | also `check_unverified` |
+| – | The step budget ran out | trace only | `step_limit` |
+
+Still out of reach (documented in the tests): real synonyms ("TIV limit" vs "TIV threshold") aren't
+caught as repeats; that would need embeddings. Turn 2 doesn't see turn 1's passages, only its answer
+(by design).
+
+### 13.3 Where you see a handoff issue
+
+Each issue appears in four places:
+1. **In the answer:** the `issues` list in the JSON response and the SSE `done` event. The UI footer
+   shows "⚠ handoff issues: truncated (researcher→writer) …"; hover for the detail.
+2. **Live in the trace:** a step from agent `handoff`, e.g. `handoff · researcher -> writer · truncated: writer saw 3 of 9 passages`.
+3. **In Prometheus:** `documind_handoff_issues_total{source, target, kind}`, a Grafana panel, and the
+   alert `DocuMindHandoffLoss`.
+4. **In the logs:** `"handoff_issues": [...]` on every `chat turn complete` line.
+
+### 13.4 Replaying a conversation: who passed what to whom
+
+```bash
+curl -s localhost:8002/v1/sessions/<session_id>/handoffs | python -m json.tool
+```
+
+The replay is rebuilt from the Postgres checkpoints. For every step it shows:
+- which agent ran (`ran`);
+- the `instruction` it was given and the `writer_brief`;
+- the `new_findings` it handed back, with their status;
+- any `new_issues`;
+- the number of passages collected so far.
+
+A real run from your stack, for *"What is the free look period, the surrender value formula, and when
+does the insurance cease?"*:
+
+```
+step 2 ran=supervisor      instr='free look period in insurance'
+step 3 ran=researcher      sources=2  finding[researcher|ok]
+step 5 ran=researcher      sources=4  finding[researcher|ok]
+step 7 ran=researcher      sources=4  finding[researcher|ok]      ← same passages as step 5
+step 8 ran=supervisor      brief='Write the final answer about t…'  ← now reaches the writer
+step 9 ran=writer → step 10 grounding_check → step 11 writer (draft 2) → step 12 grounding_check
+```
+
+The same passages run through the old and the new budget:
+
+```
+passage sizes: [968, 1736, 2032, 2320]
+budget  6000: writer saw 4 of 4 passages, 1 truncated   -> issue reported
+budget 16000: writer saw 4 of 4 passages                 -> no issue
+```
+
+### 13.5 The rule behind it
+
+Treat every handoff as an API between two services:
+- **typed:** Pydantic models validated where they are created;
+- **honest:** say `partial` or `empty`, never pretend success;
+- **counted:** a metric per source → target → kind;
+- **replayable:** checkpoints let you see exactly what each agent received.
+
+The tests ([test_handoffs.py](services/agent-service/tests/test_handoffs.py), 17 tests) script each
+failure with fake models and check that it appears as an issue.
+
+Checkpoints are also **version-tolerant**. `Finding.status` and `Finding.data` are `NotRequired`, so
+a conversation started on the old version (no status) continues on the new one, for example during a
+canary rollout.

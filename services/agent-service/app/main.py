@@ -7,6 +7,7 @@
     GET    /v1/sessions/{id}                  conversation history (from the checkpointer)
     DELETE /v1/sessions/{id}                  forget a conversation
     GET    /v1/sessions/{id}/checkpoints      every saved state of the thread (time travel)
+    GET    /v1/sessions/{id}/handoffs         which agent passed what to whom, step by step
     POST   /v1/sessions/{id}/replay/stream    continue from an old checkpoint (fork)
     GET    /v1/graph                          the agent graph as Mermaid
     GET    /v1/info                           model, prompt version, track, persistence
@@ -302,6 +303,13 @@ def create_app(settings: Settings | None = None, models=None, redis_client: redi
         _check_session(session_id)
         return {"session_id": session_id,
                 "checkpoints": await request.app.state.runner.checkpoints(session_id, limit)}
+
+    @app.get("/v1/sessions/{session_id}/handoffs")
+    async def list_handoffs(request: Request, session_id: str, limit: int = Query(300, ge=1, le=1000)):
+        """Agent-to-agent communication of a conversation, step by step."""
+        _check_session(session_id)
+        return {"session_id": session_id,
+                "handoffs": await request.app.state.runner.handoffs(session_id, limit)}
 
     @app.post("/v1/sessions/{session_id}/replay/stream", dependencies=[Depends(rate_limited)])
     async def replay(request: Request, session_id: str, body: ReplayRequest):

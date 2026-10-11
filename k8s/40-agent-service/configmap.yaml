@@ -37,6 +37,9 @@ data:
   LONG_TERM_MEMORY: "true"
   GRAPH_RECURSION_LIMIT: "80"
   HISTORY_MAX_MESSAGES: "12"
+  # passages handed to the writer; anything dropped is reported as a "truncated" handoff issue
+  WRITER_MAX_SOURCES: "12"
+  TOOL_RESULT_MAX_CHARS: "16000"
 
   # --- dependencies --------------------------------------------------------------------
   KNOWLEDGE_URL: "http://knowledge-service:8001"

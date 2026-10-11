@@ -49,7 +49,10 @@ class Settings(BaseSettings):
     grounding_check: bool = True              # verify the answer against its sources
     long_term_memory: bool = True             # remember durable user facts across sessions
     writer_max_sources: int = 12              # passages shown to the writer
-    tool_result_max_chars: int = 6000         # protects the context window
+    # text budget for those passages (~4k tokens). PDF chunks are often ~2,000
+    # characters, so 6,000 fitted only ~3; anything dropped is reported as a
+    # "truncated" handoff issue
+    tool_result_max_chars: int = 16000
     trace_content: bool = False               # put prompts/answers into trace spans (privacy!)
     max_message_chars: int = 4000
     graph_recursion_limit: int = 80           # LangGraph super-steps per turn (safety net)

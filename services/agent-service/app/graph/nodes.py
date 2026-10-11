@@ -26,9 +26,11 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command, Send
 
 from .. import metrics as m
-from .common import (decide, emit, format_findings, format_sources, history, node, numbered_sources,
-                     to_text)
+from .common import (decide, emit, format_evidence, format_findings, format_sources, history, node,
+                     numbered_sources, select_sources, to_text)
 from .context import AgentContext
+from .decisions import similar_task
+from .handoffs import finding, issue, sub_agent_report
 from .prompts import GROUNDING, MEMORY, PLANNER, supervisor_prompt, writer_prompt
 from .research import RESEARCH_GRAPH
 from .state import RESET, DocuMindState, Grounding, Memories, Plan, RouteDecision
@@ -42,8 +44,9 @@ NOT_COVERED = re.compile(r"\b(documents?|sources?|passages?)\b[^.]{0,60}\b(do no
 ABOUT_ME = re.compile(r"\b(i|i'm|im|i am|my|me|we|our|call me)\b", re.IGNORECASE)
 
 
-# returned by decide() when the grounding check never gave valid output (compared by identity)
+# fallbacks returned by decide() when the model gave no valid output (compared by identity)
 UNVERIFIED = Grounding(grounded=True)
+FALLBACK_ROUTE = RouteDecision(next="writer", reason="no valid decision")
 
 
 class ResearchTask(TypedDict):
@@ -70,8 +73,9 @@ async def start_turn(state: DocuMindState, runtime: Runtime[AgentContext]) -> di
         memories = [i.value["fact"] for i in items if "fact" in i.value]
         if memories:
             emit("memory", "recall", f"{len(memories)} facts about you")
-    return {"memories": memories, "sources": RESET, "findings": RESET, "plan": [], "instruction": "",
-            "steps": 0, "draft": 0, "answer": "", "feedback": "", "grounded": None}
+    return {"memories": memories, "sources": RESET, "findings": RESET, "issues": RESET, "plan": [],
+            "instruction": "", "writer_brief": "", "steps": 0, "draft": 0, "answer": "", "feedback": "",
+            "grounded": None}
 
 
 # ---------------------------------------------------------------------------- supervisor
@@ -83,47 +87,75 @@ async def supervisor(state: DocuMindState, runtime: Runtime[AgentContext]
     if steps >= ctx.cfg.max_steps:
         emit("supervisor", "route", "step limit reached -> writer", "info")
         m.ROUTES.labels("writer").inc()
-        return Command(goto="writer")
+        return Command(goto="writer", update={"writer_brief": "", "issues": [issue(
+            "supervisor", "writer", "step_limit",
+            f"{steps} of {ctx.cfg.max_steps} steps used: answering with what was found so far")]})
 
     sources = state.get("sources") or {}
-    files = sorted({p["filename"] for p in sources.values()})
+    findings = state.get("findings") or []
+    # the supervisor sees EXCERPTS of the evidence, not just "3 relevant passages":
+    # otherwise it decides "enough information" without knowing what the passages say
     status = (f"Current question: {state['question']}\n\n"
-              f"Findings so far:\n{format_findings(state.get('findings'))}\n\n"
-              f"Relevant passages collected: {len(sources)}"
-              + (f" (from {', '.join(files)})" if files else "") +
-              f"\nSteps used: {steps} of {ctx.cfg.max_steps}. Choose the next worker.")
+              f"Findings so far:\n{format_findings(findings)}\n\n"
+              f"Evidence collected ({len(sources)} relevant passages, best first):\n"
+              f"{format_evidence(sources)}\n\n"
+              f"Steps used: {steps} of {ctx.cfg.max_steps}. Choose the next worker. Choose 'writer' "
+              f"only if the evidence above actually answers the question (or nothing more can be found).")
     decision = await decide(
         ctx.models.structured(ctx.cfg, "supervisor", RouteDecision),
         [SystemMessage(supervisor_prompt(state.get("memories") or [])),
          *history(state, ctx.settings.history_max_messages), HumanMessage(status)],
-        RouteDecision, RouteDecision(next="writer", reason="no valid decision"),
+        RouteDecision, FALLBACK_ROUTE,
         # the validator rejects a repeated task and tells the model what that task returned
-        context={"done": {(f["agent"], f["task"].strip().lower()): f["result"]
-                          for f in state.get("findings") or []}})
+        context={"done": {(f["agent"], f["task"].strip().lower()): f["result"] for f in findings}})
 
+    issues = []
+    if decision is FALLBACK_ROUTE:
+        issues.append(issue("supervisor", "writer", "fallback_decision",
+                            "no valid routing decision from the model: answering now"))
     nxt = decision.next if decision.next in WORKERS else "writer"
+    if nxt != "writer" and not decision.instruction:      # only possible after a lenient repair
+        issues.append(issue("supervisor", nxt, "empty_instruction",
+                            "no task given: the worker gets the user's whole question"))
     instruction = (decision.instruction or state["question"]).strip()
-    done = {(f["agent"], f["task"].strip().lower()) for f in state.get("findings") or []}
-    if nxt != "writer" and (nxt, instruction.lower()) in done:      # loop guard
+    if nxt != "writer" and any(f["agent"] == nxt and similar_task(f["task"], instruction)
+                               for f in findings):        # loop guard (safety net after the validator)
+        issues.append(issue("supervisor", nxt, "repeated_task",
+                            f"'{instruction[:80]}' was already done: answering now"))
         nxt, decision.reason = "writer", "same task already done"
+    # an instruction meant for the writer travels in its own field: a stale worker
+    # instruction must never be read as the writer's brief
+    brief = decision.instruction if nxt == "writer" and decision.next == "writer" else ""
     m.ROUTES.labels(nxt).inc()
-    emit("supervisor", "route", f"-> {nxt}: {instruction if nxt != 'writer' else decision.reason}")
-    return Command(goto=nxt, update={"steps": steps + 1, "instruction": instruction})
+    emit("supervisor", "route", f"-> {nxt}: {instruction if nxt != 'writer' else (brief or decision.reason)}")
+    update = {"steps": steps + 1, "writer_brief": brief, "issues": issues}
+    if nxt != "writer":
+        update["instruction"] = instruction
+    return Command(goto=nxt, update=update)
 
 
 # ---------------------------------------------------------------------------- research
 async def _research(question: str, runtime: Runtime[AgentContext]) -> dict:
     out = await RESEARCH_GRAPH.ainvoke({"question": question}, context=runtime.context)
     relevant = out.get("relevant") or []
+    tried = out.get("tried") or []
+    issues = list(out.get("issues") or [])                 # e.g. grader_fallback from the subgraph
     if out.get("error"):
-        result = f"search failed: {out['error']}"
+        report = finding("researcher", question, f"search failed: {out['error']}", "error", queries=tried)
+        issues.append(issue("researcher", "supervisor", "search_failed", out["error"][:200]))
     elif relevant:
         files = sorted({p["filename"] for p in relevant})
-        result = f"{len(relevant)} relevant passages from {', '.join(files)}"
+        pages = sorted({p["page"] for p in relevant})
+        report = finding("researcher", question,
+                         f"{len(relevant)} relevant passages from {', '.join(files)} "
+                         f"(pages {', '.join(map(str, pages))})", "ok",
+                         passages=len(relevant), files=files, pages=pages, queries=tried)
     else:
-        result = "no relevant passages found (queries tried: " + "; ".join(out.get("tried") or []) + ")"
-    return {"sources": {p["key"]: p for p in relevant},
-            "findings": [{"agent": "researcher", "task": question, "result": result}]}
+        report = finding("researcher", question,
+                         "no relevant passages found (queries tried: " + "; ".join(tried) + ")", "empty",
+                         passages=0, queries=tried)
+        issues.append(issue("researcher", "supervisor", "no_evidence", "queries tried: " + "; ".join(tried)))
+    return {"sources": {p["key"]: p for p in relevant}, "findings": [report], "issues": issues}
 
 
 @node("researcher")
@@ -152,8 +184,9 @@ async def planner(state: DocuMindState, runtime: Runtime[AgentContext]
     return Command(
         goto=[Send("research_task", {"question": q}) for q in subs],      # fan-out
         update={"plan": subs,
-                "findings": [{"agent": "planner", "task": task,
-                              "result": f"split into {len(subs)} sub-questions researched in parallel"}]})
+                "findings": [finding("planner", task,
+                                     f"split into {len(subs)} sub-questions researched in parallel",
+                                     sub_questions=subs)]})
 
 
 # ---------------------------------------------------------------------------- prebuilt agents
@@ -169,8 +202,15 @@ async def analyst(state: DocuMindState, runtime: Runtime[AgentContext]) -> dict:
     agent = analyst_agent(ctx.models.chat(ctx.cfg, "analyst"))
     out = await agent.ainvoke({"messages": [HumanMessage(f"Instruction: {task}\n\n{_facts(state, ctx)}")]},
                               context=ctx)
-    report = to_text(out["messages"][-1].content).strip() or "no result"
-    return {"findings": [{"agent": "analyst", "task": task, "result": report}]}
+    return _sub_agent_result("analyst", task, out["messages"])
+
+
+def _sub_agent_result(agent: str, task: str, messages: list) -> dict:
+    """The sub-agent's report, checked: a run stopped by its call limit is marked
+    "partial" instead of passing the limit message on as if it were the answer."""
+    report, status, data = sub_agent_report(messages)
+    issues = [issue(agent, "supervisor", "partial_report", report[:200])] if status == "partial" else []
+    return {"findings": [finding(agent, task, report, status, **data)], "issues": issues}
 
 
 @node("librarian")
@@ -183,8 +223,7 @@ async def librarian(state: DocuMindState, runtime: Runtime[AgentContext]) -> dic
     agent = librarian_agent(ctx.models.chat(ctx.cfg, "librarian"))
     out = await agent.ainvoke({"messages": [HumanMessage(
         f"User request: {state['question']}\nSupervisor instruction: {task}")]}, context=ctx)
-    report = to_text(out["messages"][-1].content).strip() or "done"
-    return {"findings": [{"agent": "librarian", "task": task, "result": report}]}
+    return _sub_agent_result("librarian", task, out["messages"])
 
 
 # ---------------------------------------------------------------------------- writer + self-check
@@ -196,15 +235,22 @@ async def writer(state: DocuMindState, runtime: Runtime[AgentContext]) -> dict:
     feedback = state.get("feedback") or ""
     emit("writer", "draft", f"draft {draft}" + (" (revising unsupported claims)" if feedback else ""),
          draft=draft)
-    body = (f"Question: {state['question']}\n\nNumbered sources:\n{format_sources(_sources(state, ctx))}\n\n"
+    s = ctx.settings
+    selection = select_sources(state.get("sources"), s.writer_max_sources, s.tool_result_max_chars)
+    issues = []
+    if selection.lossy and draft == 1:     # researcher -> writer handoff lost passages: say so
+        issues.append(issue("researcher", "writer", "truncated", f"writer {selection.describe()}"))
+    body = (f"Question: {state['question']}\n\nNumbered sources:\n{format_sources(selection.numbered)}\n\n"
             f"Worker findings:\n{format_findings(state.get('findings'))}")
+    if state.get("writer_brief"):
+        body += f"\n\nInstruction from the supervisor for this answer: {state['writer_brief']}"
     if feedback:
         body += (f"\n\nA fact checker rejected your previous draft. These claims were NOT supported by "
                  f"the sources:\n{feedback}\nRewrite the answer without them.")
     resp = await ctx.models.chat(ctx.cfg, "writer").ainvoke(
         [SystemMessage(writer_prompt(ctx.cfg.prompt_version, state.get("memories") or [])),
          *history(state, ctx.settings.history_max_messages), HumanMessage(body)])
-    return {"answer": to_text(resp.content).strip(), "draft": draft}
+    return {"answer": to_text(resp.content).strip(), "draft": draft, "issues": issues}
 
 
 @node("grounding_check")
@@ -236,7 +282,8 @@ async def grounding_check(state: DocuMindState, runtime: Runtime[AgentContext]
     draft = state.get("draft") or 1
     if grounded and not verified:                 # never report "fact-checked" for a check that did not run
         emit("grounding", "check", "fact check could not run (invalid output): answer NOT verified", "info")
-        return Command(goto="finalize", update={"grounded": None})
+        return Command(goto="finalize", update={"grounded": None, "issues": [issue(
+            "grounding", "finalize", "check_unverified", "no valid verdict after the retry")]})
     if grounded or draft > ctx.settings.max_revisions:
         emit("grounding", "check", f"all {len(verdict.claims)} claims supported" if grounded
              else "still unsupported claims after revision", "ok" if grounded else "error")

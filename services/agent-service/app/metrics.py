@@ -31,6 +31,9 @@ GROUNDING_CHECKS = Counter("documind_grounding_checks_total", "Self-RAG answer c
 STRUCTURED_OUTPUTS = Counter("documind_structured_outputs_total",
                              "LLM decisions by Pydantic validation outcome "
                              "(valid | corrected | repaired | fallback)", ["schema", "outcome"])
+HANDOFF_ISSUES = Counter("documind_handoff_issues_total",
+                         "Information lost or degraded between two agents (see app/graph/handoffs.py)",
+                         ["source", "target", "kind"])
 INTERRUPTS = Counter("documind_hitl_decisions_total", "Human-in-the-loop decisions", ["decision"])
 
 LLM_REQUESTS = Counter("documind_llm_requests_total", "LLM API calls", ["model", "status"])

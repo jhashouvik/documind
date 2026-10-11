@@ -150,6 +150,30 @@ class AgentRunner:
                         "interrupted": bool(snap.interrupts)})
         return out
 
+    async def handoffs(self, session_id: str, limit: int = 300) -> list[dict]:
+        """Who passed what to whom, step by step (oldest first), rebuilt from the
+        checkpoints: the node that ran between two snapshots is the `next` of the
+        earlier one, and what it handed on is the difference in state."""
+        snaps = [s async for s in self.graph.aget_state_history(self.thread(session_id), limit=limit)]
+        out, prev = [], None
+        for snap in reversed(snaps):
+            v = snap.values or {}
+            if prev is not None and prev.next:
+                pv = prev.values or {}
+                same_turn = pv.get("question") == v.get("question")
+                old_f = pv.get("findings") or [] if same_turn else []
+                old_i = pv.get("issues") or [] if same_turn else []
+                out.append({
+                    "step": (snap.metadata or {}).get("step"), "question": v.get("question"),
+                    "ran": list(prev.next), "next": list(snap.next),
+                    "instruction": v.get("instruction") or "", "writer_brief": v.get("writer_brief") or "",
+                    "new_findings": [f for f in v.get("findings") or [] if f not in old_f],
+                    "new_issues": [i for i in v.get("issues") or [] if i not in old_i],
+                    "sources": len(v.get("sources") or {}), "draft": v.get("draft"),
+                    "grounded": v.get("grounded")})
+            prev = snap
+        return out
+
     # ------------------------------------------------------------------ the stream
     async def _drive(self, session_id, inp, cfg: RunConfig, user_id, mode: str,
                      checkpoint_id: str | None = None) -> AsyncIterator[AgentEvent]:
@@ -225,6 +249,7 @@ class AgentRunner:
             log.info("chat turn complete", extra=log_extra(
                 session_id=session_id, mode=mode, steps=steps, sources=len(sources), cited=len(cited),
                 agents=sorted({f["agent"] for f in findings}), grounded=values.get("grounded"),
+                handoff_issues=[i["kind"] for i in values.get("issues") or []],
                 llm_calls=usage.calls, prompt_tokens=usage.prompt_tokens,
                 completion_tokens=usage.completion_tokens, ms=took))
             yield DoneEvent(
@@ -233,7 +258,8 @@ class AgentRunner:
                 steps=steps, usage=usage.usage, llm_calls=usage.calls, model=cfg.llm_model,
                 version=self.s.app_version, track=self.s.track, took_ms=took,
                 settings=cfg.as_dict(), plan=values.get("plan") or [], findings=findings,
-                grounded=values.get("grounded"), drafts=values.get("draft") or 0)
+                grounded=values.get("grounded"), drafts=values.get("draft") or 0,
+                issues=values.get("issues") or [])
 
     @staticmethod
     def _interrupt_event(session_id: str, interrupts) -> InterruptEvent:

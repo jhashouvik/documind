@@ -55,6 +55,17 @@ spec:
           labels: {severity: warning}
           annotations:
             summary: "Answers are going out NOT fact-checked (the grounding check produced no valid verdict)"
+        - alert: DocuMindHandoffLoss
+          # agents handing on incomplete work: sub-agents cut off, evidence dropped before the writer,
+          # searches failing - the answer still comes back 200 OK, so only this metric shows it
+          expr: |
+            sum by (kind) (rate(documind_handoff_issues_total{namespace="documind",
+              kind=~"partial_report|truncated|search_failed|grader_fallback|check_unverified"}[15m])) * 60 > 1
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "Agents are losing information in handoffs ({{ $labels.kind }}, more than 1 per minute)"
+            runbook: "GET /v1/sessions/<id>/handoffs on an affected answer shows who passed what to whom"
         - alert: DocuMindAgentSaturated
           # turns in flight per pod stay high although the autoscaler is at its maximum
           expr: |

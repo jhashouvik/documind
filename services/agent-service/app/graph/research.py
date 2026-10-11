@@ -25,6 +25,7 @@ from .. import metrics as m
 from ..knowledge_client import KnowledgeUnavailable, SearchHit
 from .common import decide, emit
 from .context import AgentContext
+from .handoffs import issue
 from .prompts import GRADER, REWRITER
 from .state import Grades, Passage, ResearchState, Rewrite
 
@@ -57,17 +58,21 @@ async def grade(state: ResearchState, runtime: Runtime[AgentContext]) -> dict:
         return {}
     listing = "\n\n".join(f"[{i}] ({p['filename']}, page {p['page']}) {p['text'][:1500]}"
                           for i, p in enumerate(cands, 1))
+    keep_all = Grades(relevant=list(range(1, len(cands) + 1)))      # fail open: keep everything
     grades = await decide(ctx.models.structured(ctx.cfg, "grader", Grades),
                           [SystemMessage(GRADER),
                            HumanMessage(f"Question: {state['question']}\n\nPassages:\n{listing}")],
-                          Grades, Grades(relevant=list(range(1, len(cands) + 1))),   # fail open: keep all
-                          context={"n_passages": len(cands)})
+                          Grades, keep_all, context={"n_passages": len(cands)})
+    issues = list(state.get("issues") or [])
+    if grades is keep_all:     # the grader gave no usable verdict: passages pass UNCHECKED - say so
+        issues.append(issue("grader", "researcher", "grader_fallback",
+                            f"all {len(cands)} passages kept without a relevance check"))
     keep = [cands[i - 1] for i in sorted(set(grades.relevant)) if 1 <= i <= len(cands)]
     seen = {p["key"] for p in state.get("relevant") or []}
     relevant = [*(state.get("relevant") or []), *(p for p in keep if p["key"] not in seen)]
     emit("researcher", "grade", f"{len(keep)} of {len(cands)} passages relevant",
          "ok" if keep else "error")
-    return {"relevant": relevant}
+    return {"relevant": relevant, "issues": issues}
 
 
 def after_grade(state: ResearchState, runtime: Runtime[AgentContext]) -> Literal["rewrite", "__end__"]:

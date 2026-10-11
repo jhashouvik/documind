@@ -76,6 +76,7 @@ class ChatResponse(BaseModel):
     grounded: bool | None = None
     drafts: int = 0
     interrupt: dict | None = None
+    issues: list[dict] = []
 
 
 class InfoResponse(BaseModel):

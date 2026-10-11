@@ -104,6 +104,8 @@ header button{background:none;border:1px solid var(--line);color:var(--ink);bord
 .trace .ag{display:inline-block;min-width:84px;font-weight:500;color:var(--ink)}
 .trace li.st-error .mark{color:var(--err)}.trace li.st-ok .mark{color:var(--stable)}.trace li.st-info .mark{color:var(--cite)}
 .revise{font-family:var(--mono);font-size:11.5px;color:var(--cite);margin:0 0 6px}
+.footer-meta .issues{color:var(--err)}
+.footer-meta .issues span{border-bottom:1px dotted currentColor;cursor:help}
 .approval{border:1px solid var(--cite);background:var(--cite-bg);border-radius:10px;padding:10px 14px;margin:6px 0 10px}
 .approval b{display:block;color:var(--cite);margin-bottom:4px}
 .approval code{font-family:var(--mono);font-size:12px;word-break:break-all}
@@ -453,7 +455,10 @@ function footer(wrap, data){
   wrap.querySelector(".footer-meta").innerHTML =
     `answered by <span class="pill track-${esc(data.track)}">${esc(data.version)} ${esc(data.track)}</span> · ${esc(data.model)} · ${data.steps} supervisor step${data.steps===1?"":"s"} · ${data.llm_calls} LLM calls · ${data.usage.prompt_tokens}+${data.usage.completion_tokens} tokens · ${(data.took_ms/1000).toFixed(1)} s<br>`+
     `agents: ${esc(agents.join(", ") || "writer")}${data.plan && data.plan.length ? ` · plan: ${data.plan.length} parallel sub-questions` : ""} · ${checked}${data.drafts > 1 ? ` · ${data.drafts} drafts` : ""}<br>`+
-    `temp ${st.temperature} · top-k ${st.top_k} · threshold ${st.score_threshold ?? "default"} · prompt ${esc(st.prompt_version||"")} · kb ${esc(st.embedding_model || "default")}`;
+    `temp ${st.temperature} · top-k ${st.top_k} · threshold ${st.score_threshold ?? "default"} · prompt ${esc(st.prompt_version||"")} · kb ${esc(st.embedding_model || "default")}` +
+    // information lost or degraded between agents (app/graph/handoffs.py)
+    ((data.issues || []).length ? `<br><span class="issues">⚠ handoff issues: ${data.issues.map(i =>
+      `<span title="${esc(i.detail)}">${esc(i.kind)} (${esc(i.source)}→${esc(i.target)})</span>`).join(" · ")}</span>` : "");
 }
 
 async function runStream(wrap, url, body){

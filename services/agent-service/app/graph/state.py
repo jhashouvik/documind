@@ -11,7 +11,7 @@ The checkpointer saves this state after every super-step, keyed by thread_id
 (= the chat session id). That is the agent's short-term memory: `messages`
 survives across turns, pod restarts and replicas.
 """
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph import add_messages
@@ -31,9 +31,22 @@ class Passage(TypedDict):
 
 
 class Finding(TypedDict):
+    """A worker's report back to the supervisor (built by handoffs.finding())."""
     agent: str          # researcher | analyst | librarian | planner
     task: str           # what the supervisor asked for
-    result: str         # the worker's report back to the supervisor
+    result: str         # human-readable report
+    # NotRequired: checkpoints written by an older version have no status/data,
+    # and a conversation may continue on the new version (canary, rollout).
+    status: NotRequired[str]    # ok | empty | partial | error
+    data: NotRequired[dict]     # structured details, e.g. {"passages": 3, "pages": [10]}
+
+
+class HandoffIssue(TypedDict):
+    """Something lost or degraded between two agents (built by handoffs.issue())."""
+    source: str
+    target: str
+    kind: str
+    detail: str
 
 
 def merge_sources(old: dict | None, new: dict | str | None) -> dict:
@@ -63,8 +76,10 @@ class DocuMindState(TypedDict, total=False):
     memories: list[str]         # long-term facts about this user (from the Store)
     sources: Annotated[dict[str, Passage], merge_sources]
     findings: Annotated[list[Finding], add_findings]
+    issues: Annotated[list[HandoffIssue], add_findings]    # parallel branches may add some
     plan: list[str]
     instruction: str            # supervisor -> worker
+    writer_brief: str           # supervisor -> writer ("include the hours too"); "" = none
     steps: int                  # supervisor decisions so far
     draft: int                  # writer attempts so far
     answer: str
@@ -81,6 +96,7 @@ class ResearchState(TypedDict, total=False):
     candidates: list[Passage]
     relevant: list[Passage]
     error: str
+    issues: list[HandoffIssue]  # e.g. the grader's verdict was unusable
 
 
 # The structured-output schemas live in decisions.py (with their validators);

@@ -1082,6 +1082,52 @@
    "id": 23
   },
   {
+   "type": "timeseries",
+   "title": "Handoff issues between agents (per minute, by kind)",
+   "description": "Information lost or degraded when one agent hands work to the next (search_failed, truncated, partial_report...). Answers stay 200 OK: only this shows it.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 88,
+    "w": 24,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "legendFormat": "{{source}}→{{target}} {{kind}}",
+     "expr": "sum by (source, target, kind) (rate(documind_handoff_issues_total{namespace=\"documind\"}[5m])) * 60"
+    }
+   ],
+   "id": 24
+  },
+  {
    "type": "logs",
    "title": "DocuMind error logs (Loki)",
    "description": "From Fluent Bit -> Loki. Expand a line and click 'Open trace in Jaeger' next to trace_id.",
@@ -1091,7 +1137,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 88,
+    "y": 96,
     "w": 24,
     "h": 10
    },

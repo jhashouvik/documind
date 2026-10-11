@@ -72,6 +72,15 @@ class FindingOut(BaseModel):
     agent: str
     task: str
     result: str
+    status: Literal["ok", "empty", "partial", "error"] = "ok"    # default: older checkpoints
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class HandoffIssueOut(BaseModel):
+    source: str
+    target: str
+    kind: str
+    detail: str = ""
 
 
 class DoneEvent(_Event):
@@ -93,6 +102,7 @@ class DoneEvent(_Event):
     findings: list[FindingOut]
     grounded: bool | None
     drafts: int = Field(ge=0)
+    issues: list[HandoffIssueOut] = Field(default_factory=list)   # information lost between agents
 
 
 class ErrorEvent(_Event):

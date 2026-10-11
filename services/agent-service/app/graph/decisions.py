@@ -32,6 +32,21 @@ def _ctx(info: ValidationInfo) -> dict:
     return info.context or {}
 
 
+_WORD = re.compile(r"[a-z0-9]+")
+_STOP = {"the", "a", "an", "of", "for", "in", "on", "to", "and", "or", "is", "are", "what", "which", "how"}
+
+
+def similar_task(a: str, b: str) -> bool:
+    """Same task in slightly different words? ("free look period distance marketing"
+    vs "Free look period for distance marketing policies"). Word overlap after
+    dropping filler words; it cannot catch real synonyms ("limit" vs "threshold")."""
+    wa = {w for w in _WORD.findall(a.lower()) if w not in _STOP}
+    wb = {w for w in _WORD.findall(b.lower()) if w not in _STOP}
+    if not wa or not wb:
+        return a.strip().lower() == b.strip().lower()
+    return len(wa & wb) / len(wa | wb) >= 0.75
+
+
 def _unique(items: list[str]) -> list[str]:
     """Drop empty strings and case-insensitive duplicates, keep the order."""
     seen, out = set(), []
@@ -62,7 +77,8 @@ class RouteDecision(BaseModel):
                 return self                      # the node falls back to the user's question
             raise ValueError(f"instruction is required when next is '{self.next}'")
         done: dict = ctx.get("done") or {}       # {(agent, task.lower()): result}
-        result = done.get((self.next, self.instruction.lower()))
+        result = next((r for (agent, task), r in done.items()
+                       if agent == self.next and similar_task(task, self.instruction)), None)
         if result is not None:
             if ctx.get("lenient"):
                 self.next, self.reason = "writer", "same task already done"
