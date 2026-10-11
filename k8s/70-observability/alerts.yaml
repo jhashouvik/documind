@@ -66,6 +66,21 @@ spec:
           annotations:
             summary: "Agents are losing information in handoffs ({{ $labels.kind }}, more than 1 per minute)"
             runbook: "GET /v1/sessions/<id>/handoffs on an affected answer shows who passed what to whom"
+        - alert: DocuMindApprovalsWaiting
+          # max(): every agent replica scans and reports the same number
+          expr: max(documind_stuck_conversations{namespace="documind", state="pending_approval"}) > 0
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "{{ $value }} deletion approvals have been waiting for a human for more than 15 minutes"
+            runbook: "GET /v1/threads/stuck lists them; approve/reject with POST /v1/chat/resume"
+        - alert: DocuMindAbandonedRuns
+          expr: max(documind_stuck_conversations{namespace="documind", state="abandoned"}) > 3
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "{{ $value }} conversations stopped halfway (their last steps never ran)"
+            runbook: "Pods killed mid-turn? Check restarts/OOMKilled and terminationGracePeriodSeconds vs turn duration"
         - alert: DocuMindAgentSaturated
           # turns in flight per pod stay high although the autoscaler is at its maximum
           expr: |

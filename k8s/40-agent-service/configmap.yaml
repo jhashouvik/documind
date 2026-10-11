@@ -40,6 +40,9 @@ data:
   # passages handed to the writer; anything dropped is reported as a "truncated" handoff issue
   WRITER_MAX_SOURCES: "12"
   TOOL_RESULT_MAX_CHARS: "16000"
+  # missed handoffs: unanswered approvals / runs that died midway, older than this, are "stuck"
+  STUCK_AFTER_S: "900"
+  STUCK_SCAN_INTERVAL_S: "60"
 
   # --- dependencies --------------------------------------------------------------------
   KNOWLEDGE_URL: "http://knowledge-service:8001"

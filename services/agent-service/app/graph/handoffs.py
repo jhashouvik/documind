@@ -36,6 +36,11 @@ IssueKind = Literal[
     "step_limit",          # supervisor -> writer: step budget used up, forced to answer
     "fallback_decision",   # supervisor: no valid routing decision, defaulted to the writer
     "check_unverified",    # grounding -> finalize: the fact check produced no verdict
+    # ---- MISSED handoffs: something that should have been passed on never was ----
+    "no_research",         # supervisor -> writer: a document question answered without any search
+    "empty_answer",        # writer -> you: the writer produced nothing
+    "abandoned_run",       # previous turn stopped halfway (pod killed, timeout): its last steps never ran
+    "approval_abandoned",  # a paused approval was dropped because a new message arrived instead
 ]
 LIMIT_PREFIX = "Model call limits exceeded"      # what ModelCallLimitMiddleware writes on exit
 
@@ -64,7 +69,8 @@ def issue(source: str, target: str, kind: IssueKind, detail: str = "") -> dict:
     item = HandoffIssue(source=source, target=target, kind=kind, detail=detail)
     m.HANDOFF_ISSUES.labels(source, target, kind).inc()
     emit("handoff", f"{source} -> {target}", f"{kind}: {detail}" if detail else kind,
-         "error" if kind in ("search_failed", "partial_report", "check_unverified") else "info")
+         "error" if kind in ("search_failed", "partial_report", "check_unverified", "no_research",
+                             "empty_answer", "abandoned_run", "approval_abandoned") else "info")
     return item.model_dump()
 
 

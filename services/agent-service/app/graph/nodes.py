@@ -47,6 +47,7 @@ ABOUT_ME = re.compile(r"\b(i|i'm|im|i am|my|me|we|our|call me)\b", re.IGNORECASE
 # fallbacks returned by decide() when the model gave no valid output (compared by identity)
 UNVERIFIED = Grounding(grounded=True)
 FALLBACK_ROUTE = RouteDecision(next="writer", reason="no valid decision")
+EMPTY_ANSWER = ("I could not produce an answer to this question. Please try again or rephrase it.")
 
 
 class ResearchTask(TypedDict):
@@ -73,7 +74,10 @@ async def start_turn(state: DocuMindState, runtime: Runtime[AgentContext]) -> di
         memories = [i.value["fact"] for i in items if "fact" in i.value]
         if memories:
             emit("memory", "recall", f"{len(memories)} facts about you")
-    return {"memories": memories, "sources": RESET, "findings": RESET, "issues": RESET, "plan": [],
+    # what the previous turn left unfinished (detected by the runner) opens this turn's issues
+    carried = [issue(p["source"], p["target"], p["kind"], p["detail"]) for p in state.get("pending_issues") or []]
+    return {"memories": memories, "sources": RESET, "findings": RESET, "issues": [RESET, *carried],
+            "pending_issues": [], "plan": [],
             "instruction": "", "writer_brief": "", "steps": 0, "draft": 0, "answer": "", "feedback": "",
             "grounded": None}
 
@@ -93,6 +97,7 @@ async def supervisor(state: DocuMindState, runtime: Runtime[AgentContext]
 
     sources = state.get("sources") or {}
     findings = state.get("findings") or []
+    research_done = any(f["agent"] in ("researcher", "planner") for f in findings)
     # the supervisor sees EXCERPTS of the evidence, not just "3 relevant passages":
     # otherwise it decides "enough information" without knowing what the passages say
     status = (f"Current question: {state['question']}\n\n"
@@ -106,8 +111,10 @@ async def supervisor(state: DocuMindState, runtime: Runtime[AgentContext]
         [SystemMessage(supervisor_prompt(state.get("memories") or [])),
          *history(state, ctx.settings.history_max_messages), HumanMessage(status)],
         RouteDecision, FALLBACK_ROUTE,
-        # the validator rejects a repeated task and tells the model what that task returned
-        context={"done": {(f["agent"], f["task"].strip().lower()): f["result"] for f in findings}})
+        # the validator rejects a repeated task (and tells the model what that task returned)
+        # and a document question that tries to skip the research
+        context={"done": {(f["agent"], f["task"].strip().lower()): f["result"] for f in findings},
+                 "research_done": research_done})
 
     issues = []
     if decision is FALLBACK_ROUTE:
@@ -123,6 +130,10 @@ async def supervisor(state: DocuMindState, runtime: Runtime[AgentContext]
         issues.append(issue("supervisor", nxt, "repeated_task",
                             f"'{instruction[:80]}' was already done: answering now"))
         nxt, decision.reason = "writer", "same task already done"
+    if nxt == "writer" and decision.needs_documents and not research_done:
+        # still skipping the research after the validator's correction: a MISSED handoff
+        issues.append(issue("supervisor", "writer", "no_research",
+                            "a question that needs the documents is answered without any search"))
     # an instruction meant for the writer travels in its own field: a stale worker
     # instruction must never be read as the writer's brief
     brief = decision.instruction if nxt == "writer" and decision.next == "writer" else ""
@@ -245,8 +256,7 @@ async def writer(state: DocuMindState, runtime: Runtime[AgentContext]) -> dict:
     if state.get("writer_brief"):
         body += f"\n\nInstruction from the supervisor for this answer: {state['writer_brief']}"
     if feedback:
-        body += (f"\n\nA fact checker rejected your previous draft. These claims were NOT supported by "
-                 f"the sources:\n{feedback}\nRewrite the answer without them.")
+        body += f"\n\nA reviewer rejected your previous draft:\n{feedback}\nRewrite the answer to fix this."
     resp = await ctx.models.chat(ctx.cfg, "writer").ainvoke(
         [SystemMessage(writer_prompt(ctx.cfg.prompt_version, state.get("memories") or [])),
          *history(state, ctx.settings.history_max_messages), HumanMessage(body)])
@@ -258,10 +268,21 @@ async def grounding_check(state: DocuMindState, runtime: Runtime[AgentContext]
                           ) -> Command[Literal["writer", "finalize"]]:
     """Self-RAG: verify the draft against its sources; send it back once if needed."""
     ctx = runtime.context
+    answer = state.get("answer") or ""
+    draft = state.get("draft") or 1
+    if not answer.strip():                 # the writer handed over NOTHING (a missed handoff)
+        if draft <= ctx.settings.max_revisions:
+            return Command(goto="writer", update={
+                "feedback": "- Your previous draft was EMPTY. Write a complete answer.",
+                "issues": [issue("writer", "grounding_check", "empty_answer",
+                                 f"draft {draft} was empty: asking the writer again")]})
+        return Command(goto="finalize", update={
+            "answer": EMPTY_ANSWER, "grounded": None,
+            "issues": [issue("writer", "finalize", "empty_answer",
+                             f"still empty after {draft} drafts: sent a fallback message instead")]})
     sources = _sources(state, ctx)
     if not ctx.settings.grounding_check or not sources:
         return Command(goto="finalize", update={"grounded": None})
-    answer = state.get("answer") or ""
     verdict = await decide(
         ctx.models.structured(ctx.cfg, "grounding", Grounding),
         [SystemMessage(GROUNDING),
@@ -279,7 +300,6 @@ async def grounding_check(state: DocuMindState, runtime: Runtime[AgentContext]
     verified = verdict is not UNVERIFIED          # False: the checker never produced a valid verdict
     m.GROUNDING_CHECKS.labels("unverified" if not verified and grounded
                               else "grounded" if grounded else "ungrounded").inc()
-    draft = state.get("draft") or 1
     if grounded and not verified:                 # never report "fact-checked" for a check that did not run
         emit("grounding", "check", "fact check could not run (invalid output): answer NOT verified", "info")
         return Command(goto="finalize", update={"grounded": None, "issues": [issue(
@@ -292,7 +312,8 @@ async def grounding_check(state: DocuMindState, runtime: Runtime[AgentContext]
                                    f"{len(uncited)} uncited paragraphs" if uncited else "") if x)
     emit("grounding", "check", f"{detail} -> revise", "error")
     return Command(goto="writer", update={"grounded": False,
-                                          "feedback": "\n".join(f"- {p}" for p in problems)})
+                                          "feedback": "Claims NOT supported by the sources, or missing "
+                                                      "citations:\n" + "\n".join(f"- {p}" for p in problems)})
 
 
 BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")

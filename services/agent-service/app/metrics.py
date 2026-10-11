@@ -34,6 +34,9 @@ STRUCTURED_OUTPUTS = Counter("documind_structured_outputs_total",
 HANDOFF_ISSUES = Counter("documind_handoff_issues_total",
                          "Information lost or degraded between two agents (see app/graph/handoffs.py)",
                          ["source", "target", "kind"])
+STUCK_THREADS = Gauge("documind_stuck_conversations",
+                      "Conversations left unfinished for longer than STUCK_AFTER_S "
+                      "(pending_approval = nobody answered, abandoned = the run died midway)", ["state"])
 INTERRUPTS = Counter("documind_hitl_decisions_total", "Human-in-the-loop decisions", ["decision"])
 
 LLM_REQUESTS = Counter("documind_llm_requests_total", "LLM API calls", ["model", "status"])

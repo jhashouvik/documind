@@ -61,9 +61,13 @@ def merge_sources(old: dict | None, new: dict | str | None) -> dict:
 
 
 def add_findings(old: list | None, new: list | str | None) -> list:
+    """Append. RESET empties the list; [RESET, a, b] empties it and starts with a, b."""
     if new == RESET:
         return []
-    return (old or []) + list(new or [])
+    new = list(new or [])
+    if new and new[0] == RESET:
+        return new[1:]
+    return (old or []) + new
 
 
 class DocuMindState(TypedDict, total=False):
@@ -72,6 +76,7 @@ class DocuMindState(TypedDict, total=False):
     user_id: str | None
     # ---- reset at the start of every turn ----
     question: str
+    pending_issues: list[dict]  # found by the runner BEFORE the turn (e.g. abandoned_run)
     run_config: dict            # RunConfig of this turn: needed again on resume / replay
     memories: list[str]         # long-term facts about this user (from the Store)
     sources: Annotated[dict[str, Passage], merge_sources]

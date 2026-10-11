@@ -24,6 +24,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.errors import GraphRecursionError
@@ -66,9 +67,64 @@ class AgentRunner:
     # ------------------------------------------------------------------ entry points
     def run(self, session_id: str, question: str, cfg: RunConfig, user_id: str | None
             ) -> AsyncIterator[AgentEvent]:
-        inp = {"messages": [HumanMessage(question)], "question": question,
+        return self._new_turn(session_id, question, cfg, user_id)
+
+    async def _new_turn(self, session_id, question, cfg: RunConfig, user_id) -> AsyncIterator[AgentEvent]:
+        """A new message starts the graph FRESH: whatever the previous turn left
+        pending is silently DISCARDED by LangGraph (tested: an unfinished step never
+        runs, a paused approval simply disappears). So look first, and report it."""
+        pending = await self._leftovers(session_id)
+        inp = {"messages": [HumanMessage(question)], "question": question, "pending_issues": pending,
                "run_config": cfg.as_dict(), "user_id": user_id}
-        return self._drive(session_id, inp, cfg, user_id, "new")
+        async for ev in self._drive(session_id, inp, cfg, user_id, "new"):
+            yield ev
+
+    async def _leftovers(self, session_id: str) -> list[dict]:
+        snap = await self.graph.aget_state(self.thread(session_id))
+        if not snap.next:                                   # finished normally (or a new thread)
+            return []
+        when = f"at {snap.created_at}" if snap.created_at else ""
+        if snap.interrupts:
+            actions = ", ".join(a.get("name", "?") for a in self.pending_actions(snap)) or "an action"
+            return [{"source": "librarian", "target": "human", "kind": "approval_abandoned",
+                     "detail": f"approval of {actions} (paused {when}) was never answered; a new "
+                               f"message replaced it"}]
+        return [{"source": ",".join(snap.next), "target": "next turn", "kind": "abandoned_run",
+                 "detail": f"previous turn stopped before {', '.join(snap.next)} {when} "
+                           f"(pod restart or timeout?): those steps never ran"}]
+
+    async def stuck_threads(self, older_than_s: float, limit: int = 2000) -> dict:
+        """Conversations whose last checkpoint is unfinished and older than
+        `older_than_s`: paused approvals nobody answered, and runs that died midway.
+        (A turn takes seconds, so an unfinished checkpoint that old is not running.)"""
+        out = {"pending_approval": [], "abandoned": []}
+        now = datetime.now(timezone.utc)
+        # Phase 1: collect the thread ids and CLOSE the listing. AsyncPostgresSaver guards
+        # its connection with a lock that an open alist() keeps holding; calling
+        # aget_state() inside the loop would wait for that lock forever (a deadlock that
+        # froze every chat request - found on the real stack, InMemorySaver has no lock).
+        thread_ids: list[str] = []
+        async for tup in self.graph.checkpointer.alist(None, limit=limit):
+            conf = tup.config["configurable"]
+            tid = conf.get("thread_id")
+            if not conf.get("checkpoint_ns") and tid not in thread_ids:   # skip subgraph checkpoints
+                thread_ids.append(tid)
+        # Phase 2: the latest state of each thread
+        for tid in thread_ids:
+            snap = await self.graph.aget_state(self.thread(tid))
+            if not snap.next or not snap.created_at:
+                continue
+            age = (now - datetime.fromisoformat(snap.created_at)).total_seconds()
+            if age < older_than_s:
+                continue
+            item = {"session_id": tid, "waiting_s": int(age), "next": list(snap.next),
+                    "question": (snap.values or {}).get("question")}
+            if snap.interrupts:
+                item["actions"] = [a.get("name") for a in self.pending_actions(snap)]
+                out["pending_approval"].append(item)
+            else:
+                out["abandoned"].append(item)
+        return out
 
     async def pending(self, session_id: str):
         """The paused state of a thread, or NothingToResume."""

@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     trace_content: bool = False               # put prompts/answers into trace spans (privacy!)
     max_message_chars: int = 4000
     graph_recursion_limit: int = 80           # LangGraph super-steps per turn (safety net)
+    # missed handoffs: conversations unfinished for longer than this are "stuck"
+    # (a paused approval nobody answered, or a run that died midway)
+    stuck_after_s: int = 900
+    stuck_scan_interval_s: int = 60           # background scan -> documind_stuck_conversations; 0 = off
+    stuck_scan_limit: int = 2000              # newest checkpoints looked at per scan
 
     # --- persistence: LangGraph checkpointer + long-term store --------------------
     # postgresql://user:pass@host:5432/db. Empty = in-memory (lost on restart,

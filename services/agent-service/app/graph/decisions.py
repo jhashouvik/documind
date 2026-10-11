@@ -60,6 +60,10 @@ def _unique(items: list[str]) -> list[str]:
 # ---------------------------------------------------------------- supervisor
 class RouteDecision(BaseModel):
     """The supervisor's next move."""
+    # first field = the model decides this BEFORE it picks the next worker
+    needs_documents: bool = Field(default=False, description=(
+        "True if answering needs facts from the user's documents (policies, rules, numbers, "
+        "procedures). False only for greetings, thanks or questions about what you can do."))
     next: Worker = Field(description="Which worker acts next. 'writer' = enough information, answer now.")
     instruction: Text = Field(default="", max_length=500, description=(
         "Concrete task for that worker. For researcher: ONE short question in the document's terms, "
@@ -71,6 +75,11 @@ class RouteDecision(BaseModel):
     def _instruction_and_no_repeats(self, info: ValidationInfo):
         ctx = _ctx(info)
         if self.next == "writer":
+            # a document question must not skip the researcher (a MISSED handoff)
+            if self.needs_documents and ctx.get("research_done") is False and not ctx.get("lenient"):
+                raise ValueError("needs_documents is true but nothing has been searched yet: choose "
+                                 "researcher or planner first (needs_documents=false only if the "
+                                 "question needs no documents)")
             return self
         if not self.instruction:
             if ctx.get("lenient"):

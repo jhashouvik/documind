@@ -1128,6 +1128,52 @@
    "id": 24
   },
   {
+   "type": "timeseries",
+   "title": "Stuck conversations (missed handoffs)",
+   "description": "pending_approval = a deletion approval nobody answered; abandoned = a run that died midway. Older than STUCK_AFTER_S. List them: GET /v1/threads/stuck",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "gridPos": {
+    "x": 0,
+    "y": 96,
+    "w": 24,
+    "h": 8
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "legendFormat": "{{state}}",
+     "expr": "max by (state) (documind_stuck_conversations{namespace=\"documind\"})"
+    }
+   ],
+   "id": 25
+  },
+  {
    "type": "logs",
    "title": "DocuMind error logs (Loki)",
    "description": "From Fluent Bit -> Loki. Expand a line and click 'Open trace in Jaeger' next to trace_id.",
@@ -1137,7 +1183,7 @@
    },
    "gridPos": {
     "x": 0,
-    "y": 96,
+    "y": 104,
     "w": 24,
     "h": 10
    },

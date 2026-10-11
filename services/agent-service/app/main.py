@@ -8,6 +8,7 @@
     DELETE /v1/sessions/{id}                  forget a conversation
     GET    /v1/sessions/{id}/checkpoints      every saved state of the thread (time travel)
     GET    /v1/sessions/{id}/handoffs         which agent passed what to whom, step by step
+    GET    /v1/threads/stuck                  unanswered approvals + runs that died midway
     POST   /v1/sessions/{id}/replay/stream    continue from an old checkpoint (fork)
     GET    /v1/graph                          the agent graph as Mermaid
     GET    /v1/info                           model, prompt version, track, persistence
@@ -15,6 +16,7 @@
     GET|POST|DELETE /api/knowledge/...        pass-through to knowledge-service (for the UI)
     GET    /healthz  /readyz  /metrics
 """
+import asyncio
 import logging
 import re
 import socket
@@ -77,10 +79,26 @@ def create_app(settings: Settings | None = None, models=None, redis_client: redi
                 log.error("OPENROUTER_API_KEY is empty - /readyz will report not ready")
             log.info("ready", extra=log_extra(model=settings.llm_model, track=settings.track,
                                               persistence=p.kind, knowledge=settings.knowledge_url))
+            scan = (asyncio.create_task(_scan_stuck(app.state.runner))
+                    if settings.stuck_scan_interval_s > 0 else None)
             yield
+            if scan:
+                scan.cancel()
             await kc.close()
             await r.aclose()
             log.info("shutdown complete")
+
+    async def _scan_stuck(runner: AgentRunner) -> None:
+        """Missed handoffs nobody comes back for: count stuck conversations into a
+        gauge every STUCK_SCAN_INTERVAL_S (every replica scans; alert on max())."""
+        while True:
+            await asyncio.sleep(settings.stuck_scan_interval_s)
+            try:
+                stuck = await runner.stuck_threads(settings.stuck_after_s, settings.stuck_scan_limit)
+                for state, items in stuck.items():
+                    m.STUCK_THREADS.labels(state).set(len(items))
+            except Exception as exc:  # noqa: BLE001 - a failed scan must never stop the service
+                log.warning("stuck-conversation scan failed", extra=log_extra(error=str(exc)))
 
     app = FastAPI(title="DocuMind agent-service", version=settings.app_version, lifespan=lifespan)
     setup_tracing(app, settings.app_name, settings.app_version)
@@ -303,6 +321,16 @@ def create_app(settings: Settings | None = None, models=None, redis_client: redi
         _check_session(session_id)
         return {"session_id": session_id,
                 "checkpoints": await request.app.state.runner.checkpoints(session_id, limit)}
+
+    @app.get("/v1/threads/stuck")
+    async def stuck_threads(request: Request,
+                            older_than_s: int = Query(None, ge=0, description="default STUCK_AFTER_S")):
+        """Unfinished conversations: approvals nobody answered, runs that died midway."""
+        age = settings.stuck_after_s if older_than_s is None else older_than_s
+        stuck = await request.app.state.runner.stuck_threads(age, settings.stuck_scan_limit)
+        for state, items in stuck.items():
+            m.STUCK_THREADS.labels(state).set(len(items))
+        return {"older_than_s": age, **stuck}
 
     @app.get("/v1/sessions/{session_id}/handoffs")
     async def list_handoffs(request: Request, session_id: str, limit: int = Query(300, ge=1, le=1000)):

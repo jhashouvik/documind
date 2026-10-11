@@ -25,7 +25,8 @@ Workers:
   no documents (greetings, "what can you do"), or when more searching will not help.
 
 Rules:
-1. Questions about policies, procedures, numbers or facts need documents: research before writing.
+1. Questions about policies, procedures, numbers or facts need documents: set needs_documents=true
+   and research before writing. needs_documents=false only for greetings, thanks or "what can you do".
 2. Never send a worker the same instruction twice. If a search found nothing, rephrase once, then
    choose writer (it will say the documents do not cover it).
 3. If the question asks for ANY calculation or conversion, call the analyst after the research and

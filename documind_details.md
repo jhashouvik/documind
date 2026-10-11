@@ -894,7 +894,7 @@ c, hub, seen, _ = make_client({
 })
 ```
 
-There are 95 tests (18 for Pydantic, section 11; 17 for agent handoffs, section 13). They cover every pattern: routing, corrective RAG, parallel planning, the
+There are 105 tests (18 for Pydantic, section 11; 27 for agent handoffs, section 13). They cover every pattern: routing, corrective RAG, parallel planning, the
 analyst's tool calls, self-RAG revision, approve/reject with resume, the checkpointer, the store,
 replay, failures, streaming and the API guardrails. Run them with `make test` (inside Docker) or
 `python -m pytest` in `services/agent-service`.
@@ -1379,3 +1379,50 @@ failure with fake models and check that it appears as an issue.
 Checkpoints are also **version-tolerant**. `Finding.status` and `Finding.data` are `NotRequired`, so
 a conversation started on the old version (no status) continues on the new one, for example during a
 canary rollout.
+
+### 13.6 Missing notes: handoffs that never happen
+
+So far this section has covered **empty** notes: a handoff that arrives with nothing useful in it.
+A **missing** note is worse. A handoff that should have happened never does, and nothing looks wrong.
+
+| Gap | Example | Detection | Issue |
+|-----|---------|-----------|-------|
+| **Research skipped** | "What is the surrender formula?" goes straight to the writer, which answers from general knowledge | The supervisor must fill `needs_documents`. If it's true and nothing was searched, the validator rejects the decision and tells the model to research first. If it insists, it's reported. | `no_research` |
+| **Empty answer** | The writer returns nothing | The writer is asked once more; if it's still empty, you get "I could not produce an answer…" instead of a blank | `empty_answer` |
+| **Run died midway** | The pod is killed while the agents work | At the next message the runner sees the last checkpoint was unfinished | `abandoned_run` |
+| **Approval replaced** | The agents wait for "approve delete?", and the user sends a new message instead | Same check, at the next message | `approval_abandoned` |
+| **Nobody comes back** | An approval waits forever / a dead run is never retried | A background scan every 60 s: `GET /v1/threads/stuck`, gauge `documind_stuck_conversations{state}`, alerts `DocuMindApprovalsWaiting` and `DocuMindAbandonedRuns` | – |
+
+**Why the check must happen before the turn.** Tested with LangGraph directly: a new message starts
+the graph **fresh** and silently throws away what was left. An unfinished step never runs, and a
+pending approval simply disappears; nobody approved or rejected it. So the runner looks at the
+thread's last checkpoint *before* starting the new turn
+([runner.py](services/agent-service/app/graph/runner.py), `_leftovers()`). The issue is carried
+into the turn with a small reducer trick: `issues: [RESET, issue]` means "empty the list, then
+start with this".
+
+Real run on your stack:
+
+```
+1) "Please delete the max life policy document"  -> status: interrupted (delete_document)
+2) GET /v1/threads/stuck                         -> pending_approval: [missed-real-0002]   (0.7 s on Postgres)
+3) "Never mind. What is the free look period?"   -> answered, plus
+     approval_abandoned | librarian -> human | approval of delete_document (paused at 14:37:58) was
+                                                never answered; a new message replaced it
+4) the document is still there
+```
+
+**A bug found on the way: a deadlock that only Postgres has.** The first version of the scan asked
+for each conversation's state *while* still reading the list of checkpoints. `AsyncPostgresSaver`
+guards its connection with a lock that an open listing keeps holding, so the scan waited forever.
+Because the scan runs in the background every 60 s, **every chat request would have hung after one
+minute**. The in-memory saver used by the tests has no lock, so all tests passed. The fix is two
+phases: read the list completely, then look at each conversation. A regression test now uses a
+checkpointer with the same lock; the old code times out there.
+
+The lesson: **test against the real backing services**. A fake that behaves "nicer" than the real
+thing hides exactly this kind of bug.
+
+Tests: [test_missed_handoffs.py](services/agent-service/tests/test_missed_handoffs.py) (10 tests).
+What stays out of reach: if the supervisor wrongly says `needs_documents=false` for a document
+question, the skip isn't detected. The model's own classification is the limit.

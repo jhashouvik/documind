@@ -42,7 +42,7 @@ allow-lists and limits configured in the ConfigMaps.
 - Kubernetes: stateless agent pods with external state (Postgres StatefulSet), startup/readiness/liveness probes, graceful shutdown sized for long agent turns, HPA, PDB, topology spread, non-root + read-only root FS, NetworkPolicies, Secrets
 - GitOps (Argo CD), blue-green with an automated self-test gate and canary with a Prometheus analysis (Argo Rollouts), Karpenter NodePool (KWOK), KEDA event-driven autoscaling, Istio ambient service mesh (mTLS, identity policies)
 - Observability: Prometheus metrics (tokens, time to first token, embeddings, tool calls), Fluent Bit → Loki logs, OpenTelemetry → Jaeger traces with GenAI semantic conventions, Grafana over all three
-- 133 unit/API tests (38 knowledge-service, 95 agent-service: scripted fake models per agent role, fake Redis, in-memory Qdrant and checkpointer, mocked OpenRouter); retrieval evaluation (hit@k, MRR); CI with manifest validation and Trivy
+- 143 unit/API tests (38 knowledge-service, 105 agent-service: scripted fake models per agent role, fake Redis, in-memory Qdrant and checkpointer, mocked OpenRouter); retrieval evaluation (hit@k, MRR); CI with manifest validation and Trivy
 
 ## Layout
 
